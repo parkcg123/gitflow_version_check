@@ -27,16 +27,26 @@ repositories {
     mavenCentral()
 }
 
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
 intellij {
-    version.set("2023.3.6")
+    version.set("2024.1.7")
     type.set("IC")
-    plugins.set(listOf("git4idea"))
+    plugins.set(listOf("Git4Idea"))
 }
 
 tasks {
     patchPluginXml {
         sinceBuild.set("233")
         untilBuild.set("243.*")
+    }
+
+    withType<JavaCompile> {
+        sourceCompatibility = "17"
+        targetCompatibility = "17"
     }
 
     compileKotlin {

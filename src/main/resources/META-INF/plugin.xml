@@ -22,21 +22,26 @@
     <h3>Git Branch Version Tracker</h3>
     <p>Tracks and inspects merge commits for <code>hotfix</code>, <code>release</code>, and <code>feature</code> branches from Git commit history.</p>
     <ul>
-      <li>Automatically extracts branch type and version/task identifiers.</li>
+      <li>Displays latest branch version on the bottom-right status bar.</li>
+      <li>Click status bar widget for quick version list and one-click copy.</li>
+      <li>Customizable regex pattern with persistent settings support.</li>
+      <li>Detailed table ToolWindow located at the bottom bar.</li>
       <li>Filter by branch type (ALL, hotfix, release, feature).</li>
-      <li>Copy extracted versions directly to clipboard with a single click.</li>
       <li>Runs asynchronously in the background using native IntelliJ Git API.</li>
     </ul>
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
-    <depends>git4idea</depends>
+    <depends>Git4Idea</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow id="Git Branch Version Tracker"
-                    anchor="right"
+        <projectService serviceImplementation="com.github.gitversiontracker.GitVersionTrackerSettings"/>
+        <statusBarWidgetFactory id="GitVersionTrackerWidget"
+                                implementation="com.github.gitversiontracker.GitVersionTrackerWidgetFactory"/>
+        <toolWindow id="GitFlow Versions"
+                    anchor="bottom"
                     factoryClass="com.github.gitversiontracker.GitVersionTrackerToolWindowFactory"
-                    icon="AllIcons.Vcs.Branch"/>
+                    icon="AllIcons.Nodes.Tag"/>
         <notificationGroup id="Git Version Tracker Notifications"
                            displayType="BALLOON"/>
     </extensions>

@@ -1418,30 +1418,7 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
             }
         }
 
-        // 4. 종료된(Merged) 최신 버전 요약
-        val latestMergedHotfix = mergedItems.firstOrNull { it.type.equals("hotfix", ignoreCase = true) }
-        val latestMergedRelease = mergedItems.firstOrNull { it.type.equals("release", ignoreCase = true) }
-        val latestMergedFeature = mergedItems.firstOrNull { it.type.equals("feature", ignoreCase = true) }
-
-        rootGroup.addSeparator("Latest Finished Versions (Merged)")
-        if (latestMergedHotfix == null && latestMergedRelease == null && latestMergedFeature == null) {
-            rootGroup.add(createDisabledAction("No merged versions found"))
-        } else {
-            if (latestMergedHotfix != null) {
-                rootGroup.add(createCopyAction("[hotfix]   ${latestMergedHotfix.version}  (${latestMergedHotfix.date})", latestMergedHotfix.version, AllIcons.Vcs.Patch))
-            }
-            if (latestMergedRelease != null) {
-                rootGroup.add(createCopyAction("[release]  ${latestMergedRelease.version}  (${latestMergedRelease.date})", latestMergedRelease.version, AllIcons.Nodes.Tag))
-            }
-            if (latestMergedFeature != null) {
-                rootGroup.add(createCopyAction("[feature]  ${latestMergedFeature.version}  (${latestMergedFeature.date})", latestMergedFeature.version, AllIcons.Vcs.Branch))
-            }
-        }
-
-        // 5. 각 브랜치 타입별 상세 이력 서브메뉴
-        rootGroup.addSeparator("Version History by Branch Type")
-
-        // Hotfix 서브메뉴
+        // 4. 각 브랜치 타입별 상세 이력 서브메뉴 (1-depth 추가)
         val activeHotfixes = activeItems.filter { it.type.equals("hotfix", ignoreCase = true) }
         val mergedHotfixes = mergedItems.filter { it.type.equals("hotfix", ignoreCase = true) }
         val hotfixGroup = DefaultActionGroup(
@@ -1466,7 +1443,6 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
         if (activeHotfixes.isEmpty() && mergedHotfixes.isEmpty()) {
             hotfixGroup.add(createDisabledAction("No hotfix branches or history"))
         }
-        rootGroup.add(hotfixGroup)
 
         // Release 서브메뉴
         val activeReleases = activeItems.filter { it.type.equals("release", ignoreCase = true) }
@@ -1493,7 +1469,6 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
         if (activeReleases.isEmpty() && mergedReleases.isEmpty()) {
             releaseGroup.add(createDisabledAction("No release branches or history"))
         }
-        rootGroup.add(releaseGroup)
 
         // Feature 서브메뉴
         val activeFeatures = activeItems.filter { it.type.equals("feature", ignoreCase = true) }
@@ -1520,21 +1495,52 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
         if (activeFeatures.isEmpty() && mergedFeatures.isEmpty()) {
             featureGroup.add(createDisabledAction("No feature branches or history"))
         }
-        rootGroup.add(featureGroup)
 
         // 기타 타입
         val otherMerged = mergedItems.filter {
             !it.type.equals("hotfix", true) && !it.type.equals("release", true) && !it.type.equals("feature", true)
         }
-        if (otherMerged.isNotEmpty()) {
-            val otherGroup = DefaultActionGroup("Other Types History", true).apply {
+        val otherGroup = if (otherMerged.isNotEmpty()) {
+            DefaultActionGroup("Other Types History", true).apply {
                 templatePresentation.icon = AllIcons.Vcs.Branch
+                for (item in otherMerged.take(25)) {
+                    add(createCopyAction("[${item.type}] ${item.version}  (${item.date})", item.version, AllIcons.Nodes.Tag))
+                }
             }
-            for (item in otherMerged.take(25)) {
-                otherGroup.add(createCopyAction("[${item.type}] ${item.version}  (${item.date})", item.version, AllIcons.Nodes.Tag))
-            }
-            rootGroup.add(otherGroup)
+        } else null
+
+        // 최상위 메뉴는 딱 한 칸(1-depth)으로 히스토리 그룹 구성
+        rootGroup.addSeparator("History")
+        val historyRootGroup = DefaultActionGroup("Version History (내역 보기)", true).apply {
+            templatePresentation.icon = AllIcons.Vcs.History
         }
+
+        // 최신 종료 버전 요약 (히스토리 내부 1-depth 안에 포함)
+        val latestMergedHotfix = mergedItems.firstOrNull { it.type.equals("hotfix", ignoreCase = true) }
+        val latestMergedRelease = mergedItems.firstOrNull { it.type.equals("release", ignoreCase = true) }
+        val latestMergedFeature = mergedItems.firstOrNull { it.type.equals("feature", ignoreCase = true) }
+        if (latestMergedHotfix != null || latestMergedRelease != null || latestMergedFeature != null) {
+            historyRootGroup.addSeparator("Latest Finished Summary")
+            if (latestMergedHotfix != null) {
+                historyRootGroup.add(createCopyAction("[hotfix]   ${latestMergedHotfix.version}  (${latestMergedHotfix.date})", latestMergedHotfix.version, AllIcons.Vcs.Patch))
+            }
+            if (latestMergedRelease != null) {
+                historyRootGroup.add(createCopyAction("[release]  ${latestMergedRelease.version}  (${latestMergedRelease.date})", latestMergedRelease.version, AllIcons.Nodes.Tag))
+            }
+            if (latestMergedFeature != null) {
+                historyRootGroup.add(createCopyAction("[feature]  ${latestMergedFeature.version}  (${latestMergedFeature.date})", latestMergedFeature.version, AllIcons.Vcs.Branch))
+            }
+        }
+
+        historyRootGroup.addSeparator("Branch Type History")
+        historyRootGroup.add(hotfixGroup)
+        historyRootGroup.add(releaseGroup)
+        historyRootGroup.add(featureGroup)
+        if (otherGroup != null) {
+            historyRootGroup.add(otherGroup)
+        }
+
+        rootGroup.add(historyRootGroup)
 
         // 6. 신규 생성 및 브랜치 작업 (1-depth 서브메뉴로 완전 분리/격리)
         rootGroup.addSeparator("GitFlow Management")
@@ -2120,8 +2126,11 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
         rootGroup.add(createCopyAction("Next Hotfix:   ${suggestion.nextHotfix} (Patch)", suggestion.nextHotfix, AllIcons.Vcs.Patch))
         rootGroup.add(createCopyAction("Next Release:  ${suggestion.nextMinorRelease} (Minor)", suggestion.nextMinorRelease, AllIcons.Nodes.Tag))
 
-        // 3. Version History Submenus (내역 보기)
-        rootGroup.addSeparator("Version History (내역 보기)")
+        // 3. Version History Submenus (내역 보기) - 1뎁스 추가하여 맨 처음엔 한 칸으로 구성
+        rootGroup.addSeparator("History")
+        val historyRootGroup = DefaultActionGroup("Version History (내역 보기)", true).apply {
+            templatePresentation.icon = AllIcons.Vcs.History
+        }
         val hotfixes = allItems.filter { it.type.equals("hotfix", ignoreCase = true) }
         val releases = allItems.filter { it.type.equals("release", ignoreCase = true) }
         val features = allItems.filter { it.type.equals("feature", ignoreCase = true) }
@@ -2146,7 +2155,7 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
         if (hotfixes.isEmpty()) {
             hotfixGroup.add(createDisabledAction("No hotfix branches found"))
         }
-        rootGroup.add(hotfixGroup)
+        historyRootGroup.add(hotfixGroup)
 
         val releaseGroup = DefaultActionGroup("Release History (${releases.size})", true).apply {
             templatePresentation.icon = AllIcons.Nodes.Tag
@@ -2168,7 +2177,7 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
         if (releases.isEmpty()) {
             releaseGroup.add(createDisabledAction("No release branches found"))
         }
-        rootGroup.add(releaseGroup)
+        historyRootGroup.add(releaseGroup)
 
         val featureGroup = DefaultActionGroup("Feature History (${features.size})", true).apply {
             templatePresentation.icon = AllIcons.Vcs.Branch
@@ -2190,7 +2199,9 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
         if (features.isEmpty()) {
             featureGroup.add(createDisabledAction("No feature branches found"))
         }
-        rootGroup.add(featureGroup)
+        historyRootGroup.add(featureGroup)
+
+        rootGroup.add(historyRootGroup)
 
         val dataContext = DataManager.getInstance().getDataContext(gitFlowButton)
         val popup = JBPopupFactory.getInstance().createActionGroupPopup(

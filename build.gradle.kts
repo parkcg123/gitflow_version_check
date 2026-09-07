@@ -44,6 +44,10 @@ tasks {
         untilBuild.set("271.*")
     }
 
+    buildSearchableOptions {
+        enabled = false
+    }
+
     withType<JavaCompile> {
         sourceCompatibility = "17"
         targetCompatibility = "17"

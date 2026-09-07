@@ -1204,7 +1204,7 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
     }
 
     private var myStatusBar: StatusBar? = null
-    private val label = JBLabel("FlowTags", AllIcons.Nodes.Tag, SwingConstants.LEFT).apply {
+    private val label = JBLabel("FlowTags", FlowTagsIcons.FlowTags, SwingConstants.LEFT).apply {
         cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
         toolTipText = "FlowTags - Click to view & manage GitFlow versions"
     }
@@ -1398,8 +1398,8 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
         val suggestion = SemVerHelper.suggestNext(latestVersionForBump)
 
         rootGroup.addSeparator("Suggested Next Versions (Click to Copy)")
-        rootGroup.add(createCopyAction("Next Hotfix:   ${suggestion.nextHotfix} (Patch)", suggestion.nextHotfix, AllIcons.Vcs.Patch))
-        rootGroup.add(createCopyAction("Next Release:  ${suggestion.nextMinorRelease} (Minor)", suggestion.nextMinorRelease, AllIcons.Nodes.Tag))
+        rootGroup.add(createCopyAction("Next Hotfix:   ${suggestion.nextHotfix} (Patch)", suggestion.nextHotfix, FlowTagsIcons.Hotfix))
+        rootGroup.add(createCopyAction("Next Release:  ${suggestion.nextMinorRelease} (Minor)", suggestion.nextMinorRelease, FlowTagsIcons.Release))
 
         // 3. 진행 중인(Active) 브랜치 목록 (클릭 시 버전 복사)
         rootGroup.addSeparator("Active Branches (Click to Copy)")
@@ -1410,8 +1410,9 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
                 val suffix = if (item.isCurrent) " (Current)" else ""
                 val title = "[${item.type}]  ${item.version}$suffix"
                 val icon = when (item.type.lowercase()) {
-                    "hotfix" -> AllIcons.Vcs.Patch
-                    "release" -> AllIcons.Nodes.Tag
+                    "hotfix" -> FlowTagsIcons.Hotfix
+                    "release" -> FlowTagsIcons.Release
+                    "feature" -> FlowTagsIcons.Feature
                     else -> AllIcons.Vcs.Branch
                 }
                 rootGroup.add(createCopyAction(title, item.version, icon))
@@ -1425,7 +1426,7 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
             "Hotfix History (Active: ${activeHotfixes.size}, Merged: ${mergedHotfixes.size})",
             true
         ).apply {
-            templatePresentation.icon = AllIcons.Vcs.Patch
+            templatePresentation.icon = FlowTagsIcons.Hotfix
         }
         if (activeHotfixes.isNotEmpty()) {
             hotfixGroup.addSeparator("Active Branches")
@@ -1451,7 +1452,7 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
             "Release History (Active: ${activeReleases.size}, Merged: ${mergedReleases.size})",
             true
         ).apply {
-            templatePresentation.icon = AllIcons.Nodes.Tag
+            templatePresentation.icon = FlowTagsIcons.Release
         }
         if (activeReleases.isNotEmpty()) {
             releaseGroup.addSeparator("Active Branches")
@@ -1477,7 +1478,7 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
             "Feature History (Active: ${activeFeatures.size}, Merged: ${mergedFeatures.size})",
             true
         ).apply {
-            templatePresentation.icon = AllIcons.Vcs.Branch
+            templatePresentation.icon = FlowTagsIcons.Feature
         }
         if (activeFeatures.isNotEmpty()) {
             featureGroup.addSeparator("Active Branches")
@@ -1522,13 +1523,13 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
         if (latestMergedHotfix != null || latestMergedRelease != null || latestMergedFeature != null) {
             historyRootGroup.addSeparator("Latest Finished Summary")
             if (latestMergedHotfix != null) {
-                historyRootGroup.add(createCopyAction("[hotfix]   ${latestMergedHotfix.version}  (${latestMergedHotfix.date})", latestMergedHotfix.version, AllIcons.Vcs.Patch))
+                historyRootGroup.add(createCopyAction("[hotfix]   ${latestMergedHotfix.version}  (${latestMergedHotfix.date})", latestMergedHotfix.version, FlowTagsIcons.Hotfix))
             }
             if (latestMergedRelease != null) {
-                historyRootGroup.add(createCopyAction("[release]  ${latestMergedRelease.version}  (${latestMergedRelease.date})", latestMergedRelease.version, AllIcons.Nodes.Tag))
+                historyRootGroup.add(createCopyAction("[release]  ${latestMergedRelease.version}  (${latestMergedRelease.date})", latestMergedRelease.version, FlowTagsIcons.Release))
             }
             if (latestMergedFeature != null) {
-                historyRootGroup.add(createCopyAction("[feature]  ${latestMergedFeature.version}  (${latestMergedFeature.date})", latestMergedFeature.version, AllIcons.Vcs.Branch))
+                historyRootGroup.add(createCopyAction("[feature]  ${latestMergedFeature.version}  (${latestMergedFeature.date})", latestMergedFeature.version, FlowTagsIcons.Feature))
             }
         }
 
@@ -1569,21 +1570,21 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
         }
         gitFlowGroup.addSeparator("Start New Branch")
 
-        gitFlowGroup.add(object : AnAction("Start Hotfix... (${suggestion.nextHotfix})", "Start hotfix from main/master", AllIcons.Vcs.Patch) {
+        gitFlowGroup.add(object : AnAction("Start Hotfix... (${suggestion.nextHotfix})", "Start hotfix from main/master", FlowTagsIcons.Hotfix) {
             override fun actionPerformed(e: AnActionEvent) {
                 GitFlowHelper.promptStartBranch(project, "hotfix", suggestion.nextHotfix) {
                     loadGitVersions()
                 }
             }
         })
-        gitFlowGroup.add(object : AnAction("Start Release... (${suggestion.nextMinorRelease})", "Start release from develop", AllIcons.Nodes.Tag) {
+        gitFlowGroup.add(object : AnAction("Start Release... (${suggestion.nextMinorRelease})", "Start release from develop", FlowTagsIcons.Release) {
             override fun actionPerformed(e: AnActionEvent) {
                 GitFlowHelper.promptStartBranch(project, "release", suggestion.nextMinorRelease) {
                     loadGitVersions()
                 }
             }
         })
-        gitFlowGroup.add(object : AnAction("Start Feature...", "Start feature from develop", AllIcons.Vcs.Branch) {
+        gitFlowGroup.add(object : AnAction("Start Feature...", "Start feature from develop", FlowTagsIcons.Feature) {
             override fun actionPerformed(e: AnActionEvent) {
                 GitFlowHelper.promptStartBranch(project, "feature", "") {
                     loadGitVersions()
@@ -1610,8 +1611,9 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
             gitFlowGroup.addSeparator("Manage Active Branches")
             for (item in activeItems) {
                 val branchIcon = when (item.type.lowercase()) {
-                    "hotfix" -> AllIcons.Vcs.Patch
-                    "release" -> AllIcons.Nodes.Tag
+                    "hotfix" -> FlowTagsIcons.Hotfix
+                    "release" -> FlowTagsIcons.Release
+                    "feature" -> FlowTagsIcons.Feature
                     else -> AllIcons.Vcs.Branch
                 }
                 val branchOpsGroup = DefaultActionGroup(item.fullBranchName, true).apply {
@@ -1686,7 +1688,7 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
             }
         })
 
-        rootGroup.add(object : AnAction("Open FlowTags ToolWindow...", "Open bottom FlowTags tool window", AllIcons.Vcs.History) {
+        rootGroup.add(object : AnAction("Open FlowTags ToolWindow...", "Open bottom FlowTags tool window", FlowTagsIcons.FlowTags) {
             override fun actionPerformed(e: AnActionEvent) {
                 val tw = ToolWindowManager.getInstance(project).getToolWindow("FlowTags")
                     ?: ToolWindowManager.getInstance(project).getToolWindow("GitFlow Versions")
@@ -1754,7 +1756,7 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
     private val refreshButton = JButton("Refresh", AllIcons.Actions.Refresh)
     private val pullButton = JButton("Pull & Sync", AllIcons.Vcs.Fetch)
     private val copyButton = JButton("Copy", AllIcons.Actions.Copy)
-    private val gitFlowButton = JButton("FlowTags ▾", AllIcons.Nodes.Tag)
+    private val gitFlowButton = JButton("FlowTags ▾", FlowTagsIcons.FlowTags)
     private val checkoutButton = JButton("Checkout", AllIcons.Actions.CheckOut)
     private val settingsButton = JButton("Settings", AllIcons.General.Settings)
     private val statusLabel = JBLabel("Ready")
@@ -1849,9 +1851,9 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
                 val comp = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column) as JLabel
                 val typeStr = value?.toString()?.lowercase() ?: ""
                 comp.icon = when (typeStr) {
-                    "hotfix" -> AllIcons.Vcs.Patch
-                    "release" -> AllIcons.Nodes.Tag
-                    "feature" -> AllIcons.Vcs.Branch
+                    "hotfix" -> FlowTagsIcons.Hotfix
+                    "release" -> FlowTagsIcons.Release
+                    "feature" -> FlowTagsIcons.Feature
                     else -> null
                 }
                 return comp
@@ -2123,8 +2125,8 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
 
         // 2. Next Version Suggestions
         rootGroup.addSeparator("Suggested Next Versions (Click to Copy)")
-        rootGroup.add(createCopyAction("Next Hotfix:   ${suggestion.nextHotfix} (Patch)", suggestion.nextHotfix, AllIcons.Vcs.Patch))
-        rootGroup.add(createCopyAction("Next Release:  ${suggestion.nextMinorRelease} (Minor)", suggestion.nextMinorRelease, AllIcons.Nodes.Tag))
+        rootGroup.add(createCopyAction("Next Hotfix:   ${suggestion.nextHotfix} (Patch)", suggestion.nextHotfix, FlowTagsIcons.Hotfix))
+        rootGroup.add(createCopyAction("Next Release:  ${suggestion.nextMinorRelease} (Minor)", suggestion.nextMinorRelease, FlowTagsIcons.Release))
 
         // 3. Version History Submenus (내역 보기) - 1뎁스 추가하여 맨 처음엔 한 칸으로 구성
         rootGroup.addSeparator("History")
@@ -2136,7 +2138,7 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
         val features = allItems.filter { it.type.equals("feature", ignoreCase = true) }
 
         val hotfixGroup = DefaultActionGroup("Hotfix History (${hotfixes.size})", true).apply {
-            templatePresentation.icon = AllIcons.Vcs.Patch
+            templatePresentation.icon = FlowTagsIcons.Hotfix
         }
         val hotfixActive = hotfixes.filter { !it.isFinished }
         val hotfixMerged = hotfixes.filter { it.isFinished }
@@ -2158,7 +2160,7 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
         historyRootGroup.add(hotfixGroup)
 
         val releaseGroup = DefaultActionGroup("Release History (${releases.size})", true).apply {
-            templatePresentation.icon = AllIcons.Nodes.Tag
+            templatePresentation.icon = FlowTagsIcons.Release
         }
         val releaseActive = releases.filter { !it.isFinished }
         val releaseMerged = releases.filter { it.isFinished }
@@ -2180,7 +2182,7 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
         historyRootGroup.add(releaseGroup)
 
         val featureGroup = DefaultActionGroup("Feature History (${features.size})", true).apply {
-            templatePresentation.icon = AllIcons.Vcs.Branch
+            templatePresentation.icon = FlowTagsIcons.Feature
         }
         val featureActive = features.filter { !it.isFinished }
         val featureMerged = features.filter { it.isFinished }

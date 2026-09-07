@@ -49,7 +49,7 @@
         <toolWindow id="FlowTags"
                     anchor="bottom"
                     factoryClass="com.github.gitversiontracker.GitVersionTrackerToolWindowFactory"
-                    icon="AllIcons.Nodes.Tag"/>
+                    icon="/icons/flowTags.svg"/>
         <notificationGroup id="Git Version Tracker Notifications"
                            displayType="BALLOON"/>
     </extensions>

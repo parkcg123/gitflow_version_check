@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+  <defs>
+    <linearGradient id="flowTagsBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3574F0"/>
+      <stop offset="60%" stop-color="#5E5CE6"/>
+      <stop offset="100%" stop-color="#8250DF"/>
+    </linearGradient>
+    <linearGradient id="tagFill" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#E8EDF9" stop-opacity="0.85"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="1.5" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- Background Squircle -->
+  <rect x="1.5" y="1.5" width="37" height="37" rx="9" fill="url(#flowTagsBg)"/>
+  <rect x="1.5" y="1.5" width="37" height="37" rx="9" fill="none" stroke="#FFFFFF" stroke-width="0.8" stroke-opacity="0.2"/>
+
+  <!-- Git Branch Stem (Flow) -->
+  <path d="M 11 31 V 20 C 11 15 15.5 14 20.5 14" fill="none" stroke="#FFFFFF" stroke-width="2.6" stroke-linecap="round"/>
+  <circle cx="11" cy="30.5" r="2.8" fill="#FFFFFF"/>
+  <circle cx="11" cy="20" r="2.2" fill="#FFFFFF" fill-opacity="0.9"/>
+
+  <!-- Version Tag Badge (Tags) -->
+  <g filter="url(#shadow)">
+    <path d="M 21.5 9.5 H 28.5 C 29.6 9.5 30.5 10.4 30.5 11.5 V 17.5 C 30.5 18.05 30.28 18.57 29.89 18.96 L 23.46 25.39 C 22.68 26.17 21.42 26.17 20.64 25.39 L 16.11 20.86 C 15.33 20.08 15.33 18.82 16.11 18.04 L 21.04 13.11 C 21.43 12.72 21.5 12.2 21.5 11.5 V 9.5 Z"
+          fill="url(#tagFill)"/>
+    <!-- Tag Eyelet -->
+    <circle cx="26.8" cy="13.2" r="1.7" fill="#4B63EB"/>
+    <!-- Micro Branch inside Tag -->
+    <path d="M 20.5 18.5 L 22.5 20.5" stroke="#5E5CE6" stroke-width="1.4" stroke-linecap="round"/>
+  </g>
+</svg>

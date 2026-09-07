@@ -1,0 +1,43 @@
+<!--
+  Copyright 2026 Git Branch Version Tracker Contributors
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<idea-plugin>
+    <id>com.github.gitversiontracker</id>
+    <name>Git Branch Version Tracker</name>
+    <vendor url="https://github.com/parkcg123/gitflow_version_check">parkcg123</vendor>
+
+    <description><![CDATA[
+    <h3>Git Branch Version Tracker</h3>
+    <p>Tracks and inspects merge commits for <code>hotfix</code>, <code>release</code>, and <code>feature</code> branches from Git commit history.</p>
+    <ul>
+      <li>Automatically extracts branch type and version/task identifiers.</li>
+      <li>Filter by branch type (ALL, hotfix, release, feature).</li>
+      <li>Copy extracted versions directly to clipboard with a single click.</li>
+      <li>Runs asynchronously in the background using native IntelliJ Git API.</li>
+    </ul>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>git4idea</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="Git Branch Version Tracker"
+                    anchor="right"
+                    factoryClass="com.github.gitversiontracker.GitVersionTrackerToolWindowFactory"
+                    icon="AllIcons.Vcs.Branch"/>
+        <notificationGroup id="Git Version Tracker Notifications"
+                           displayType="BALLOON"/>
+    </extensions>
+</idea-plugin>

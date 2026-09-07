@@ -468,6 +468,11 @@ object GitFlowHelper {
         tagPrefix: String,
         onFinished: (() -> Unit)? = null
     ) {
+        if (!isWorkingTreeClean(project, repo)) {
+            notifyMessage(project, "Cannot initialize GitFlow: You have uncommitted changes. Please commit or stash them first.", NotificationType.WARNING)
+            return
+        }
+
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Initializing GitFlow...", false) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
@@ -523,6 +528,22 @@ object GitFlowHelper {
             notifyMessage(project, "No Git repository found in project.", NotificationType.ERROR)
             return
         }
+
+        if (!isWorkingTreeClean(project, repo)) {
+            Messages.showWarningDialog(
+                project,
+                "작업 공간에 아직 커밋되거나 스태시되지 않은 수정된 파일이 있습니다.\n" +
+                "안전한 브랜치 생성 및 초기화를 위해 먼저 변경 사항을 커밋하거나 Stash 해주세요.",
+                "GitFlow Init 불가 (수정된 파일 존재)"
+            )
+            notifyMessage(
+                project,
+                "Cannot initialize GitFlow: You have uncommitted changes. Please commit or stash them first.",
+                NotificationType.WARNING
+            )
+            return
+        }
+
         val settings = GitVersionTrackerSettings.getInstance(project)
 
         val prodConfig = readGitConfig(project, repo, "gitflow.branch.master") ?: settings.state.productionBranch

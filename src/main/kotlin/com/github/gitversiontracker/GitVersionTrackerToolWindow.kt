@@ -1183,9 +1183,9 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
     }
 
     private var myStatusBar: StatusBar? = null
-    private val label = JBLabel("gitflow version", AllIcons.Nodes.Tag, SwingConstants.LEFT).apply {
+    private val label = JBLabel("FlowTags", AllIcons.Nodes.Tag, SwingConstants.LEFT).apply {
         cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-        toolTipText = "gitflow version - Click to view & manage GitFlow branches"
+        toolTipText = "FlowTags - Click to view & manage GitFlow versions"
     }
 
     private var currentBranchName: String = "unknown"
@@ -1659,9 +1659,10 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
             }
         })
 
-        rootGroup.add(object : AnAction("Open GitFlow Versions ToolWindow...", "Open bottom GitFlow Versions tool window", AllIcons.Vcs.History) {
+        rootGroup.add(object : AnAction("Open FlowTags ToolWindow...", "Open bottom FlowTags tool window", AllIcons.Vcs.History) {
             override fun actionPerformed(e: AnActionEvent) {
-                val tw = ToolWindowManager.getInstance(project).getToolWindow("GitFlow Versions")
+                val tw = ToolWindowManager.getInstance(project).getToolWindow("FlowTags")
+                    ?: ToolWindowManager.getInstance(project).getToolWindow("GitFlow Versions")
                     ?: ToolWindowManager.getInstance(project).getToolWindow("Git Branch Version Tracker")
                 tw?.show()
             }
@@ -1669,7 +1670,7 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
 
         val dataContext = DataManager.getInstance().getDataContext(label)
         val popup = JBPopupFactory.getInstance().createActionGroupPopup(
-            "GitFlow Versions",
+            "FlowTags",
             rootGroup,
             dataContext,
             JBPopupFactory.ActionSelectionAid.SPEEDSEARCH,
@@ -1726,7 +1727,7 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
     private val refreshButton = JButton("Refresh", AllIcons.Actions.Refresh)
     private val pullButton = JButton("Pull & Sync", AllIcons.Vcs.Fetch)
     private val copyButton = JButton("Copy", AllIcons.Actions.Copy)
-    private val gitFlowButton = JButton("GitFlow ▾", AllIcons.Nodes.Tag)
+    private val gitFlowButton = JButton("FlowTags ▾", AllIcons.Nodes.Tag)
     private val checkoutButton = JButton("Checkout", AllIcons.Actions.CheckOut)
     private val settingsButton = JButton("Settings", AllIcons.General.Settings)
     private val statusLabel = JBLabel("Ready")
@@ -1771,7 +1772,7 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
         styleButton(refreshButton, "Refresh versions manually")
         styleButton(pullButton, "Run 'git pull' and sync versions")
         styleButton(copyButton, "Copy selected version to clipboard (선택 버전 복사)")
-        styleButton(gitFlowButton, "GitFlow operations: Start branch, Finish branch, Init")
+        styleButton(gitFlowButton, "FlowTags operations: Start branch, Finish branch, Init")
         styleButton(checkoutButton, "Checkout selected active branch")
         styleButton(settingsButton, "Configure GitFlow branches, prefixes, and regex pattern")
 
@@ -2172,7 +2173,7 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
 
         val dataContext = DataManager.getInstance().getDataContext(gitFlowButton)
         val popup = JBPopupFactory.getInstance().createActionGroupPopup(
-            "GitFlow Operations & History",
+            "FlowTags Operations & History",
             rootGroup,
             dataContext,
             JBPopupFactory.ActionSelectionAid.SPEEDSEARCH,

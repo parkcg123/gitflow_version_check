@@ -14,22 +14,30 @@
   limitations under the License.
 -->
 <idea-plugin>
-    <id>com.github.gitversiontracker</id>
-    <name>Git Branch Version Tracker</name>
+    <id>com.github.parkcg123.flowtags</id>
+    <name>FlowTags</name>
     <vendor url="https://github.com/parkcg123/gitflow_version_check">parkcg123</vendor>
 
     <description><![CDATA[
-    <h3>Git Branch Version Tracker</h3>
-    <p>Tracks and inspects merge commits for <code>hotfix</code>, <code>release</code>, and <code>feature</code> branches from Git commit history.</p>
+    <h3>FlowTags - GitFlow & Semantic Version Manager</h3>
+    <p>Seamlessly manage GitFlow branching lifecycles and automatically track Semantic Versioning (SemVer) directly inside IntelliJ IDEA.</p>
     <ul>
-      <li>Displays latest branch version on the bottom-right status bar.</li>
-      <li>Click status bar widget for quick version list and one-click copy.</li>
-      <li>Customizable regex pattern with persistent settings support.</li>
-      <li>Detailed table ToolWindow located at the bottom bar.</li>
-      <li>Filter by branch type (ALL, hotfix, release, feature).</li>
-      <li>Runs asynchronously in the background using native IntelliJ Git API.</li>
+      <li><b>Status Bar & ToolWindow:</b> Quick access to active branches, latest merged versions, and one-click copy.</li>
+      <li><b>Next Version Suggestion:</b> Automatically calculates and suggests next Hotfix (+patch) and Release (+minor) versions by analyzing both commit history and active branches.</li>
+      <li><b>Full GitFlow Support:</b> Built-in Init, Start (Hotfix/Release/Feature), and Finish with automatic branch merging and cleanup.</li>
+      <li><b>Conflict & Safety Checks:</b> Prevents actions when uncommitted changes exist, alerts on merge conflicts.</li>
     </ul>
     ]]></description>
+
+    <change-notes><![CDATA[
+    <h4>1.0.0</h4>
+    <ul>
+      <li>Initial release of FlowTags.</li>
+      <li>GitFlow Init, Start, and Finish operations with automated branch lifecycle management.</li>
+      <li>Dual-source Semantic Version calculator across commit history and in-progress branches.</li>
+      <li>Status bar widget and dedicated bottom ToolWindow with one-click version copying.</li>
+    </ul>
+    ]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>Git4Idea</depends>
@@ -38,7 +46,7 @@
         <projectService serviceImplementation="com.github.gitversiontracker.GitVersionTrackerSettings"/>
         <statusBarWidgetFactory id="GitVersionTrackerWidget"
                                 implementation="com.github.gitversiontracker.GitVersionTrackerWidgetFactory"/>
-        <toolWindow id="GitFlow Versions"
+        <toolWindow id="FlowTags"
                     anchor="bottom"
                     factoryClass="com.github.gitversiontracker.GitVersionTrackerToolWindowFactory"
                     icon="AllIcons.Nodes.Tag"/>

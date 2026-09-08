@@ -1709,6 +1709,7 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
         popup.show(RelativePoint(label, Point(0, 0)))
     }
 
+
     private fun notifyMessage(content: String, type: NotificationType) {
         GitFlowHelper.notifyMessage(project, content, type)
     }

@@ -40,6 +40,7 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.vcs.changes.ChangeListManager
 import com.intellij.openapi.wm.CustomStatusBarWidget
 import com.intellij.openapi.wm.StatusBar
 import com.intellij.openapi.wm.StatusBarWidget
@@ -303,11 +304,86 @@ object GitFlowHelper {
         return Regex("""^(?:[a-zA-Z0-9_\-]+/)?($h|$r|$f)/(.+)$""")
     }
 
+    fun getGitConfigFile(repo: GitRepository): File? {
+        val rootPath = repo.root.path
+        val gitDirOrFile = File(rootPath, ".git")
+        if (!gitDirOrFile.exists()) return null
+        if (gitDirOrFile.isDirectory) {
+            return File(gitDirOrFile, "config")
+        }
+        if (gitDirOrFile.isFile) {
+            val line = gitDirOrFile.readLines().firstOrNull { it.trim().startsWith("gitdir:") }
+            if (line != null) {
+                val targetPath = line.substringAfter("gitdir:").trim()
+                val resolvedDir = if (File(targetPath).isAbsolute) File(targetPath) else File(rootPath, targetPath)
+                return File(resolvedDir, "config")
+            }
+        }
+        return null
+    }
+
+    fun readGitConfigFromFile(repo: GitRepository, key: String): String? {
+        val parts = key.split('.')
+        if (parts.size < 2) return null
+        val targetSection = if (parts.size == 2) {
+            parts[0].trim().lowercase()
+        } else {
+            "${parts[0].trim().lowercase()} \"${parts[1].trim()}\""
+        }
+        val targetKey = parts.last().trim().lowercase()
+
+        val configFile = getGitConfigFile(repo) ?: return null
+        if (!configFile.exists() || !configFile.canRead()) return null
+
+        return try {
+            var currentSection: String? = null
+            var matchedValue: String? = null
+            configFile.forEachLine { rawLine ->
+                if (matchedValue != null) return@forEachLine
+                val line = rawLine.trim()
+                if (line.isEmpty() || line.startsWith("#") || line.startsWith(";")) {
+                    // comment or empty
+                } else if (line.startsWith("[") && line.endsWith("]")) {
+                    val content = line.substring(1, line.length - 1).trim()
+                    currentSection = if (content.contains('"')) {
+                        val secName = content.substringBefore('"').trim().lowercase()
+                        val subName = content.substringAfter('"').substringBeforeLast('"')
+                        "$secName \"$subName\""
+                    } else {
+                        content.lowercase()
+                    }
+                } else if (currentSection != null && currentSection.equals(targetSection, ignoreCase = true) && line.contains('=')) {
+                    val k = line.substringBefore('=').trim().lowercase()
+                    if (k == targetKey) {
+                        matchedValue = line.substringAfter('=').trim().ifEmpty { null }
+                    }
+                }
+            }
+            matchedValue
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     fun readGitConfig(project: Project, repo: GitRepository, key: String): String? {
-        val handler = GitLineHandler(project, repo.root, GitCommand.CONFIG)
-        handler.addParameters("--get", key)
-        val result = Git.getInstance().runCommand(handler)
-        return if (result.success()) result.outputAsJoinedString.trim().ifEmpty { null } else null
+        // 1. Direct file read: 0ms, zero processes, 100% safe on EDT (fixes BuiltInServerManagerImpl assertion)
+        val fromFile = readGitConfigFromFile(repo, key)
+        if (fromFile != null) return fromFile
+
+        // 2. If running on EDT, do NOT spawn external git process
+        if (ApplicationManager.getApplication().isDispatchThread) {
+            return null
+        }
+
+        // 3. Background thread fallback: use CLI git config --get
+        return try {
+            val handler = GitLineHandler(project, repo.root, GitCommand.CONFIG)
+            handler.addParameters("--get", key)
+            val result = Git.getInstance().runCommand(handler)
+            if (result.success()) result.outputAsJoinedString.trim().ifEmpty { null } else null
+        } catch (e: Throwable) {
+            null
+        }
     }
 
     fun writeGitConfig(project: Project, repo: GitRepository, key: String, value: String) {
@@ -337,10 +413,21 @@ object GitFlowHelper {
     }
 
     fun isWorkingTreeClean(project: Project, repo: GitRepository): Boolean {
-        val handler = GitLineHandler(project, repo.root, GitCommand.STATUS)
-        handler.addParameters("--porcelain")
-        val result = Git.getInstance().runCommand(handler)
-        return result.success() && result.output.none { it.isNotBlank() }
+        // When on EDT, use in-memory ChangeListManager to avoid blocking EDT or triggering built-in server assertion
+        if (ApplicationManager.getApplication().isDispatchThread) {
+            val changeListManager = ChangeListManager.getInstance(project)
+            return changeListManager.allChanges.isEmpty()
+        }
+
+        return try {
+            val handler = GitLineHandler(project, repo.root, GitCommand.STATUS)
+            handler.addParameters("--porcelain")
+            val result = Git.getInstance().runCommand(handler)
+            result.success() && result.output.none { it.isNotBlank() }
+        } catch (e: Throwable) {
+            val changeListManager = ChangeListManager.getInstance(project)
+            changeListManager.allChanges.isEmpty()
+        }
     }
 
     fun isGitFlowInitialized(project: Project): Boolean {

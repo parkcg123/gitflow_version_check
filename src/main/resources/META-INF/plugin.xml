@@ -30,6 +30,13 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h4>1.0.1</h4>
+    <ul>
+      <li>Fixed EDT assertion error when opening status bar popup by reading Git configs directly from repository files.</li>
+      <li>Eliminated synchronous Git CLI process spawning on the UI thread for instant popup rendering.</li>
+      <li>Added custom-designed SVG icons for FlowTags, Hotfix, Release, and Feature branch types.</li>
+      <li>Restructured version history into a clean 1-depth submenu.</li>
+    </ul>
     <h4>1.0.0</h4>
     <ul>
       <li>Initial release of FlowTags.</li>

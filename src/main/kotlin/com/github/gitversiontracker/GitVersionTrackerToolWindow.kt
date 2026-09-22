@@ -725,6 +725,7 @@ object GitFlowHelper {
         project: Project,
         branchName: String,
         deleteBranch: Boolean,
+        deleteRemoteBranch: Boolean = false,
         createTag: Boolean,
         onFinished: (() -> Unit)? = null
     ) {
@@ -761,6 +762,31 @@ object GitFlowHelper {
                     return
                 }
 
+                val deleteDesc = when {
+                    deleteBranch && deleteRemoteBranch -> " and deleted branch (local & remote)"
+                    deleteBranch -> " and deleted local branch"
+                    deleteRemoteBranch -> " and deleted remote branch"
+                    else -> ""
+                }
+
+                fun deleteRemoteIfRequested() {
+                    if (deleteRemoteBranch && repo.remotes.isNotEmpty()) {
+                        val remoteName = repo.branches.findRemoteBranch("origin/$branchName")?.remote?.name
+                            ?: repo.branches.remoteBranches.firstOrNull { it.nameForRemoteOperations == branchName }?.remote?.name
+                            ?: repo.remotes.firstOrNull()?.name
+                            ?: "origin"
+                        indicator.text = "Deleting remote branch '$branchName' on $remoteName..."
+                        val success = runGit(project, repo, GitCommand.PUSH, remoteName, "--delete", branchName)
+                        if (!success) {
+                            notifyMessage(
+                                project,
+                                "Note: Remote branch '$remoteName/$branchName' could not be deleted (it might not exist on remote or requires permissions).",
+                                NotificationType.WARNING
+                            )
+                        }
+                    }
+                }
+
                 when (branchType) {
                     "feature" -> {
                         // 1. Checkout devBranch
@@ -780,13 +806,14 @@ object GitFlowHelper {
                         }
 
                         // 3. Delete branch if requested
+                        deleteRemoteIfRequested()
                         if (deleteBranch) {
                             indicator.text = "Deleting local branch $branchName..."
                             runGit(project, repo, GitCommand.BRANCH, "-d", branchName)
                         }
 
                         repo.update()
-                        notifyMessage(project, "GitFlow Finish: Merged '$branchName' into '$devBranch'${if (deleteBranch) " and deleted branch" else ""}.", NotificationType.INFORMATION)
+                        notifyMessage(project, "GitFlow Finish: Merged '$branchName' into '$devBranch'$deleteDesc.", NotificationType.INFORMATION)
                         onFinished?.let { ApplicationManager.getApplication().invokeLater(it) }
                     }
 
@@ -833,6 +860,7 @@ object GitFlowHelper {
                         }
 
                         // 5. Delete branch if requested
+                        deleteRemoteIfRequested()
                         if (deleteBranch) {
                             indicator.text = "Deleting local branch $branchName..."
                             runGit(project, repo, GitCommand.BRANCH, "-d", branchName)
@@ -843,7 +871,7 @@ object GitFlowHelper {
                         runGit(project, repo, GitCommand.CHECKOUT, returnBranch)
 
                         repo.update()
-                        notifyMessage(project, "GitFlow Finish: '$branchName' merged into $prodBranch & $devBranch${if (createTag) ", tagged as '$tagName'" else ""}.", NotificationType.INFORMATION)
+                        notifyMessage(project, "GitFlow Finish: '$branchName' merged into $prodBranch & $devBranch${if (createTag) ", tagged as '$tagName'" else ""}$deleteDesc.", NotificationType.INFORMATION)
                         onFinished?.let { ApplicationManager.getApplication().invokeLater(it) }
                     }
 
@@ -853,9 +881,10 @@ object GitFlowHelper {
                         if (runGit(project, repo, GitCommand.CHECKOUT, devBranch)) {
                             val mergeMsg = "Merge branch '$branchName' into $devBranch"
                             runGit(project, repo, GitCommand.MERGE, "--no-ff", "-m", mergeMsg, branchName)
+                            deleteRemoteIfRequested()
                             if (deleteBranch) runGit(project, repo, GitCommand.BRANCH, "-d", branchName)
                             repo.update()
-                            notifyMessage(project, "Merged '$branchName' into '$devBranch'.", NotificationType.INFORMATION)
+                            notifyMessage(project, "Merged '$branchName' into '$devBranch'$deleteDesc.", NotificationType.INFORMATION)
                             onFinished?.let { ApplicationManager.getApplication().invokeLater(it) }
                         }
                     }
@@ -920,12 +949,13 @@ object GitFlowHelper {
         val prodBranch = getEffectiveProductionBranch(repo, settings.state.productionBranch)
         val devBranch = getEffectiveDevelopBranch(repo, settings.state.developBranch, prodBranch)
 
-        val dialog = GitFlowFinishDialog(project, branchName, prodBranch, devBranch, settings.state.tagPrefix)
+        val dialog = GitFlowFinishDialog(project, repo, branchName, prodBranch, devBranch, settings.state.tagPrefix)
         if (dialog.showAndGet()) {
             finishBranch(
                 project = project,
                 branchName = branchName,
                 deleteBranch = dialog.isDeleteBranch(),
+                deleteRemoteBranch = dialog.isDeleteRemoteBranch(),
                 createTag = dialog.isCreateTag(),
                 onFinished = onFinished
             )
@@ -1113,6 +1143,7 @@ class GitFlowStartDialog(
  */
 class GitFlowFinishDialog(
     project: Project,
+    private val repo: GitRepository,
     private val branchName: String,
     private val prodBranch: String,
     private val devBranch: String,
@@ -1125,7 +1156,24 @@ class GitFlowFinishDialog(
 
     private val tagName = "$tagPrefix$identifier"
     private val tagCheckbox = JBCheckBox("Create Git tag '$tagName'", branchType != "feature")
-    private val deleteCheckbox = JBCheckBox("Delete local branch '$branchName' after merge", true)
+    private val deleteLocalCheckbox = JBCheckBox("Delete local branch '$branchName' after merge", true)
+
+    private val remoteBranch = repo.branches.findRemoteBranch("origin/$branchName")
+        ?: repo.branches.remoteBranches.firstOrNull { it.nameForRemoteOperations == branchName }
+    private val hasRemoteBranch = remoteBranch != null
+    private val remoteName = remoteBranch?.remote?.name ?: repo.remotes.firstOrNull()?.name ?: "origin"
+    private val hasRemotes = repo.remotes.isNotEmpty()
+
+    private val deleteRemoteCheckbox = JBCheckBox(
+        if (hasRemoteBranch) "Delete remote branch ('$remoteName/$branchName') after merge"
+        else "Delete remote branch ('$remoteName/$branchName')",
+        hasRemoteBranch
+    ).apply {
+        isEnabled = hasRemotes
+        if (!hasRemotes) {
+            text = "Delete remote branch (No remote repository configured)"
+        }
+    }
 
     init {
         title = "Finish GitFlow Branch"
@@ -1143,26 +1191,27 @@ class GitFlowFinishDialog(
             "feature" -> "<html>Finish feature branch <code><b>$branchName</b></code>:<br/>" +
                     "• Checkout and merge into <b>$devBranch</b> (<code>--no-ff</code>)<br/>" +
                     "• Commit message: <code>Merge branch '$branchName' into $devBranch</code><br/>" +
-                    "• Clean up local feature branch</html>"
+                    "• Clean up feature branch (local / remote)</html>"
             "release" -> "<html>Finish release branch <code><b>$branchName</b></code>:<br/>" +
                     "• Checkout and merge into <b>$prodBranch</b> (<code>--no-ff</code>)<br/>" +
                     "• Prod commit: <code>Merge branch '$branchName' into $prodBranch</code><br/>" +
                     "• Tag release as <b>$tagName</b> (Message: <code>Release $tagName</code>)<br/>" +
                     "• Merge back into <b>$devBranch</b> (<code>--no-ff</code>)<br/>" +
-                    "• Clean up local release branch</html>"
+                    "• Clean up release branch (local / remote)</html>"
             "hotfix" -> "<html>Finish hotfix branch <code><b>$branchName</b></code>:<br/>" +
                     "• Checkout and merge into <b>$prodBranch</b> (<code>--no-ff</code>)<br/>" +
                     "• Prod commit: <code>Merge branch '$branchName' into $prodBranch</code><br/>" +
                     "• Tag hotfix as <b>$tagName</b> (Message: <code>Hotfix $tagName</code>)<br/>" +
                     "• Merge back into <b>$devBranch</b> (<code>--no-ff</code>)<br/>" +
-                    "• Clean up local hotfix branch</html>"
+                    "• Clean up hotfix branch (local / remote)</html>"
             else -> "<html>Merge branch <code><b>$branchName</b></code> into <b>$devBranch</b> (<code>--no-ff</code>)</html>"
         }
 
         val descLabel = JBLabel(descHtml)
-        val optionsPanel = JPanel(GridLayout(2, 1, 0, 6))
+        val optionsPanel = JPanel(GridLayout(3, 1, 0, 6))
         optionsPanel.add(tagCheckbox)
-        optionsPanel.add(deleteCheckbox)
+        optionsPanel.add(deleteLocalCheckbox)
+        optionsPanel.add(deleteRemoteCheckbox)
 
         panel.add(descLabel, BorderLayout.NORTH)
         panel.add(optionsPanel, BorderLayout.CENTER)
@@ -1170,7 +1219,8 @@ class GitFlowFinishDialog(
     }
 
     fun isCreateTag(): Boolean = tagCheckbox.isSelected
-    fun isDeleteBranch(): Boolean = deleteCheckbox.isSelected
+    fun isDeleteBranch(): Boolean = deleteLocalCheckbox.isSelected
+    fun isDeleteRemoteBranch(): Boolean = deleteRemoteCheckbox.isSelected && deleteRemoteCheckbox.isEnabled
 }
 
 /**

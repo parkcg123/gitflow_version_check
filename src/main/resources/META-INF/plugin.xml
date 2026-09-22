@@ -30,6 +30,11 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h4>1.0.2</h4>
+    <ul>
+      <li>Added option to automatically delete remote branch (e.g. origin/feature, origin/hotfix) upon finishing GitFlow branches.</li>
+      <li>Smart remote detection: auto-selects remote deletion if branch is already tracked on remote.</li>
+    </ul>
     <h4>1.0.1</h4>
     <ul>
       <li>Fixed EDT assertion error when opening status bar popup by reading Git configs directly from repository files.</li>

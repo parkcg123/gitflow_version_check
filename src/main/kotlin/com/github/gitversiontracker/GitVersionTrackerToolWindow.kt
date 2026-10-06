@@ -421,9 +421,9 @@ object GitFlowHelper {
 
         return try {
             val handler = GitLineHandler(project, repo.root, GitCommand.STATUS)
-            handler.addParameters("--porcelain")
+            handler.addParameters("--porcelain", "--untracked-files=no")
             val result = Git.getInstance().runCommand(handler)
-            result.success() && result.output.none { it.isNotBlank() }
+            result.success() && result.output.none { it.isNotBlank() && !it.startsWith("??") }
         } catch (e: Throwable) {
             val changeListManager = ChangeListManager.getInstance(project)
             changeListManager.allChanges.isEmpty()

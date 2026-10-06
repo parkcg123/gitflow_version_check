@@ -1350,6 +1350,9 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
     private var activeItems: List<GitVersionItem> = emptyList()
     private var mergedItems: List<GitVersionItem> = emptyList()
     private var lastFetchHeadTimestamp: Long = -1L
+    private var hasInitialLoaded: Boolean = false
+    private var lastKnownRevision: String? = null
+    private var isLoading: Boolean = false
 
     init {
         label.addMouseListener(object : MouseAdapter() {
@@ -1367,22 +1370,24 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
         // 초기 fetch_head 타임스탬프 기록
         lastFetchHeadTimestamp = GitFlowHelper.getFetchHeadTimestamp(project)
 
-        // Git 이벤트 리스너: git pull (FETCH_HEAD 변경) 발생 시에만 전체 로그 갱신!
+        // Git 이벤트 리스너: pull / 브랜치 변경 / 커밋 변경 / 초기 레포 감지 시 갱신!
         val connection = project.messageBus.connect(this)
         connection.subscribe(GitRepository.GIT_REPO_CHANGE, GitRepositoryChangeListener { repo ->
             val currentFetchTime = GitFlowHelper.getFetchHeadTimestamp(project)
             val isPull = (lastFetchHeadTimestamp != -1L && currentFetchTime > lastFetchHeadTimestamp)
             lastFetchHeadTimestamp = currentFetchTime
 
-            if (isPull) {
+            val branch = repo.currentBranchName ?: "unknown"
+            val currentRev = repo.currentRevision
+            val isRevChanged = (currentRev != null && currentRev != lastKnownRevision)
+            val isBranchChanged = (branch != currentBranchName)
+            val needsInitialLoad = !hasInitialLoaded || (activeItems.isEmpty() && mergedItems.isEmpty())
+
+            lastKnownRevision = currentRev
+            currentBranchName = branch
+
+            if (isPull || isRevChanged || isBranchChanged || needsInitialLoad) {
                 loadGitVersions()
-            } else {
-                val branch = repo.currentBranchName ?: "unknown"
-                if (branch != currentBranchName) {
-                    ApplicationManager.getApplication().invokeLater {
-                        currentBranchName = branch
-                    }
-                }
             }
         })
 
@@ -1392,13 +1397,23 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
     override fun getComponent(): JComponent = label
 
     fun loadGitVersions() {
+        if (isLoading) return
+
         val repoManager = GitRepositoryManager.getInstance(project)
         val repositories = repoManager.repositories
         if (repositories.isEmpty()) {
             activeItems = emptyList()
             mergedItems = emptyList()
             currentBranchName = "no git"
+            hasInitialLoaded = false
             return
+        }
+
+        hasInitialLoaded = true
+        val currentRepo = repositories.firstOrNull()
+        if (currentRepo != null) {
+            currentBranchName = currentRepo.currentBranchName ?: "unknown"
+            lastKnownRevision = currentRepo.currentRevision
         }
 
         val settings = GitVersionTrackerSettings.getInstance(project)
@@ -1415,6 +1430,7 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
             settings.state.featurePrefix
         )
 
+        isLoading = true
         ProgressManager.getInstance().run(object : Task.Backgroundable(
             project, "Loading Git Branch Versions...", false
         ) {
@@ -1500,7 +1516,16 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
                     currentBranchName = detectedCurrentBranch
                     activeItems = collectedActive
                     mergedItems = collectedMerged
+                    isLoading = false
                 }
+            }
+
+            override fun onCancel() {
+                isLoading = false
+            }
+
+            override fun onThrowable(error: Throwable) {
+                isLoading = false
             }
         })
     }
@@ -1524,6 +1549,10 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
     }
 
     private fun showPopup() {
+        if (!hasInitialLoaded || (activeItems.isEmpty() && mergedItems.isEmpty())) {
+            loadGitVersions()
+        }
+
         val rootGroup = DefaultActionGroup()
 
         // 1. 현재 브랜치 정보 (클릭 시 복사)
@@ -1540,7 +1569,9 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
 
         // 3. 진행 중인(Active) 브랜치 목록 (클릭 시 버전 복사)
         rootGroup.addSeparator("Active Branches (Click to Copy)")
-        if (activeItems.isEmpty()) {
+        if (isLoading && activeItems.isEmpty() && mergedItems.isEmpty()) {
+            rootGroup.add(createDisabledAction("Loading Git versions..."))
+        } else if (activeItems.isEmpty()) {
             rootGroup.add(createDisabledAction("No active hotfix/release/feature branches"))
         } else {
             for (item in activeItems) {
@@ -1901,6 +1932,9 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
 
     private var allItems: List<GitVersionItem> = emptyList()
     private var lastFetchHeadTimestamp: Long = -1L
+    private var hasInitialLoaded: Boolean = false
+    private var lastKnownRevision: String? = null
+    private var lastKnownBranch: String? = null
 
     private fun styleButton(btn: JButton, tooltip: String) {
         btn.isFocusPainted = false
@@ -1916,17 +1950,25 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
         // 초기 fetch_head 타임스탬프 기록
         lastFetchHeadTimestamp = GitFlowHelper.getFetchHeadTimestamp(project)
 
-        // Git 이벤트 발생 시: git pull (FETCH_HEAD 변경)이 감지될 때만 버전 목록 갱신!
+        // Git 이벤트 발생 시: pull / 브랜치 변경 / 커밋(리비전) 변경 / 최초 레포 로드 시 버전 목록 갱신!
         val connection = project.messageBus.connect(this)
         connection.subscribe(GitRepository.GIT_REPO_CHANGE, GitRepositoryChangeListener { repo ->
             val currentFetchTime = GitFlowHelper.getFetchHeadTimestamp(project)
             val isPull = (lastFetchHeadTimestamp != -1L && currentFetchTime > lastFetchHeadTimestamp)
             lastFetchHeadTimestamp = currentFetchTime
 
-            if (isPull) {
+            val currentBranch = repo.currentBranchName ?: "HEAD"
+            val currentRev = repo.currentRevision
+            val isRevChanged = (currentRev != null && currentRev != lastKnownRevision)
+            val isBranchChanged = (currentBranch != lastKnownBranch)
+            val needsInitialLoad = !hasInitialLoaded || allItems.isEmpty()
+
+            lastKnownRevision = currentRev
+            lastKnownBranch = currentBranch
+
+            if (isPull || isRevChanged || isBranchChanged || needsInitialLoad) {
                 loadGitVersions()
             } else {
-                val currentBranch = repo.currentBranchName ?: "HEAD"
                 updateStatusLabelWithBranch(currentBranch)
             }
         })
@@ -2355,16 +2397,28 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
     }
 
     fun loadGitVersions() {
-        val selectedLimit = limitCombo.selectedItem as? Int ?: 500
+        if (!refreshButton.isEnabled) {
+            return
+        }
+
         val repositoryManager = GitRepositoryManager.getInstance(project)
         val repositories = repositoryManager.repositories
 
         if (repositories.isEmpty()) {
             statusLabel.text = "No Git repository found in project."
             tableModel.rowCount = 0
+            hasInitialLoaded = false
             return
         }
 
+        hasInitialLoaded = true
+        val currentRepo = repositories.firstOrNull()
+        if (currentRepo != null) {
+            lastKnownBranch = currentRepo.currentBranchName
+            lastKnownRevision = currentRepo.currentRevision
+        }
+
+        val selectedLimit = limitCombo.selectedItem as? Int ?: 500
         val settings = GitVersionTrackerSettings.getInstance(project)
         val patternString = settings.state.pattern
         val regex = try {

@@ -30,6 +30,10 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h4>1.0.3</h4>
+    <ul>
+      <li>Improved branch safety checks: ignore untracked files when starting GitFlow branches so newly created or unstaged files do not block branch creation.</li>
+    </ul>
     <h4>1.0.2</h4>
     <ul>
       <li>Added option to automatically delete remote branch (e.g. origin/feature, origin/hotfix) upon finishing GitFlow branches.</li>

@@ -32,7 +32,7 @@
     <change-notes><![CDATA[
     <h4>1.0.4</h4>
     <ul>
-      <li>Enhanced version recommendation: support underscore delimiter in previous versions (e.g. 1.0.64_20260411clip) and generate next version cleanly with hyphen and today's date (e.g. 1.0.65-YYYYMMDD).</li>
+      <li>Enhanced version recommendation: support underscore delimiter in previous versions (e.g. 1.0.64_20260411clip) and unconditionally append today's date with hyphen across Hotfix, Release, and Feature branches (e.g. 1.0.65-YYYYMMDD, 1.1.0-YYYYMMDD, feature/name-YYYYMMDD), cleanly stripping custom tags.</li>
       <li>Auto-load versions immediately upon opening project and repository discovery without requiring manual 'git pull'.</li>
     </ul>
     <h4>1.0.3</h4>

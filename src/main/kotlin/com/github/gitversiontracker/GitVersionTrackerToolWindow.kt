@@ -118,6 +118,7 @@ object SemVerHelper {
         val nextHotfix: String,
         val nextMinorRelease: String,
         val nextMajorRelease: String,
+        val nextFeature: String = "",
         val baseVersion: String? = null
     )
 
@@ -192,8 +193,9 @@ object SemVerHelper {
         if (latestVersion.isNullOrBlank()) {
             return NextVersionSuggestion(
                 nextHotfix = "1.0.1-$todayBasic",
-                nextMinorRelease = "1.1.0",
-                nextMajorRelease = "2.0.0",
+                nextMinorRelease = "1.1.0-$todayBasic",
+                nextMajorRelease = "2.0.0-$todayBasic",
+                nextFeature = "-$todayBasic",
                 baseVersion = null
             )
         }
@@ -217,14 +219,10 @@ object SemVerHelper {
             val dateSuffix = "$delimiter$todayFormatted"
 
             val nextHotfix = "$prefix$major.$minor.${patch + 1}$dateSuffix"
-            val nextMinor = if (parsed.suffix.isNotEmpty()) {
-                "$prefix$major.${minor + 1}.0$dateSuffix"
-            } else {
-                "$prefix$major.${minor + 1}.0"
-            }
-            val nextMajor = "$prefix${major + 1}.0.0"
+            val nextMinor = "$prefix$major.${minor + 1}.0$dateSuffix"
+            val nextMajor = "$prefix${major + 1}.0.0$dateSuffix"
 
-            return NextVersionSuggestion(nextHotfix, nextMinor, nextMajor, latestVersion)
+            return NextVersionSuggestion(nextHotfix, nextMinor, nextMajor, dateSuffix, latestVersion)
         }
 
         val trailingDigitsRegex = Regex("""^(.*?)(\d+)$""")
@@ -1110,9 +1108,18 @@ class GitFlowStartDialog(
         })
     }
 
+    private fun formatWithDate(raw: String): String {
+        if (raw.isBlank()) return raw
+        val todayBasic = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)
+        val hasDate = raw.matches(Regex(""".*[-_.]\d{8}(?:[-_.].*)?$""")) ||
+                      raw.matches(Regex(""".*[-_.]\d{4}[-.]\d{1,2}[-.]\d{1,2}(?:[-_.].*)?$""")) ||
+                      raw.matches(Regex("""^\d{8}$"""))
+        return if (hasDate) raw else "$raw-$todayBasic"
+    }
+
     private fun updatePreview() {
         val input = identifierField.text.trim()
-        val display = if (input.isEmpty()) "..." else input
+        val display = if (input.isEmpty()) "..." else formatWithDate(input)
         previewLabel.text = "<html>Branch to create: <code><b>$branchPrefix$display</b></code></html>"
     }
 
@@ -1139,7 +1146,7 @@ class GitFlowStartDialog(
         return panel
     }
 
-    fun getIdentifier(): String = identifierField.text.trim()
+    fun getIdentifier(): String = formatWithDate(identifierField.text.trim())
 
     override fun doValidate(): ValidationInfo? {
         val text = getIdentifier()

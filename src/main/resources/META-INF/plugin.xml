@@ -30,6 +30,11 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h4>1.0.4</h4>
+    <ul>
+      <li>Enhanced version recommendation: support underscore delimiter in previous versions (e.g. 1.0.64_20260411clip) and generate next version cleanly with hyphen and today's date (e.g. 1.0.65-YYYYMMDD).</li>
+      <li>Auto-load versions immediately upon opening project and repository discovery without requiring manual 'git pull'.</li>
+    </ul>
     <h4>1.0.3</h4>
     <ul>
       <li>Improved branch safety checks: ignore untracked files when starting GitFlow branches so newly created or unstaged files do not block branch creation.</li>

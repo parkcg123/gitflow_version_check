@@ -191,7 +191,7 @@ object SemVerHelper {
         val todayBasic = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) // e.g. 20261014
         if (latestVersion.isNullOrBlank()) {
             return NextVersionSuggestion(
-                nextHotfix = "1.0.1_$todayBasic",
+                nextHotfix = "1.0.1-$todayBasic",
                 nextMinorRelease = "1.1.0",
                 nextMajorRelease = "2.0.0",
                 baseVersion = null
@@ -205,12 +205,13 @@ object SemVerHelper {
             val minor = parsed.minor
             val patch = parsed.patch
 
-            val delimiter = if (parsed.delimiter.isNotEmpty()) parsed.delimiter else "_"
+            // Middle delimiter is always '-' as requested
+            val delimiter = "-"
 
             // Determine today's date format (YYYY-MM-DD vs YYYY.MM.DD vs YYYYMMDD)
             val todayFormatted = when {
-                parsed.suffix.contains("-") -> LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
-                parsed.suffix.contains(".") -> LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy.MM.dd"))
+                parsed.suffix.matches(Regex(""".*\d{4}-\d{1,2}-\d{1,2}.*""")) -> LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+                parsed.suffix.matches(Regex(""".*\d{4}\.\d{1,2}\.\d{1,2}.*""")) -> LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy.MM.dd"))
                 else -> todayBasic // e.g. 20261014
             }
             val dateSuffix = "$delimiter$todayFormatted"

@@ -30,6 +30,11 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h4>1.0.5</h4>
+    <ul>
+      <li>Enhanced startup reliability: reliably auto-load versions on project open with 5-stage VCS discovery, repo.update synchronization, and fallback direct branch queries without requiring manual 'git pull'.</li>
+      <li>Automatic date attachment: unconditionally append today's date with hyphen delimiter across Hotfix, Release, and Feature branches (e.g. 1.0.65-YYYYMMDD, feature/name-YYYYMMDD), while stripping legacy custom tags.</li>
+    </ul>
     <h4>1.0.4</h4>
     <ul>
       <li>Enhanced version recommendation: support underscore delimiter in previous versions (e.g. 1.0.64_20260411clip) and unconditionally append today's date with hyphen across Hotfix, Release, and Feature branches (e.g. 1.0.65-YYYYMMDD, 1.1.0-YYYYMMDD, feature/name-YYYYMMDD), cleanly stripping custom tags.</li>

@@ -32,7 +32,10 @@ import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
+import com.intellij.dvcs.repo.VcsRepositoryManager
+import com.intellij.dvcs.repo.VcsRepositoryMappingListener
 import com.intellij.openapi.project.DumbAware
+import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.DialogWrapper
@@ -40,7 +43,11 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.vcs.ProjectLevelVcsManager
+import com.intellij.openapi.vcs.VcsListener
 import com.intellij.openapi.vcs.changes.ChangeListManager
+import com.intellij.util.concurrency.AppExecutorUtil
+import java.util.concurrent.TimeUnit
 import com.intellij.openapi.wm.CustomStatusBarWidget
 import com.intellij.openapi.wm.StatusBar
 import com.intellij.openapi.wm.StatusBarWidget
@@ -1413,13 +1420,29 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
             }
         })
 
+        // VCS 리포지토리 매핑 등록/변경 감지 (프로젝트 오픈 시 Git 레포가 비동기로 로드될 때 발행됨)
+        connection.subscribe(VcsRepositoryManager.VCS_REPOSITORY_MAPPING_UPDATED, VcsRepositoryMappingListener {
+            loadGitVersions()
+        })
+
+        // VCS 설정 변경 감지
+        connection.subscribe(ProjectLevelVcsManager.VCS_CONFIGURATION_CHANGED, VcsListener {
+            loadGitVersions()
+        })
+
+        // 프로젝트 인덱싱/스마트 모드 진입 시 자동 확인
+        DumbService.getInstance(project).runWhenSmart {
+            loadGitVersions()
+        }
+
         loadGitVersions()
     }
 
     override fun getComponent(): JComponent = label
 
-    fun loadGitVersions() {
+    fun loadGitVersions(attempt: Int = 0) {
         if (isLoading) return
+        if (project.isDisposed) return
 
         val repoManager = GitRepositoryManager.getInstance(project)
         val repositories = repoManager.repositories
@@ -1428,6 +1451,17 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
             mergedItems = emptyList()
             currentBranchName = "no git"
             hasInitialLoaded = false
+            label.toolTipText = "FlowTags - Waiting for Git repository..."
+            // 프로젝트 시작 시 비동기로 레포지토리가 로딩되는 동안 지연 재시도 (최대 5회)
+            if (attempt < 5) {
+                AppExecutorUtil.getAppScheduledExecutorService().schedule({
+                    ApplicationManager.getApplication().invokeLater {
+                        if (!project.isDisposed) {
+                            loadGitVersions(attempt + 1)
+                        }
+                    }
+                }, ((attempt + 1) * 1000L), TimeUnit.MILLISECONDS)
+            }
             return
         }
 
@@ -1535,10 +1569,15 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
                 }
 
                 ApplicationManager.getApplication().invokeLater {
+                    if (project.isDisposed) return@invokeLater
                     currentBranchName = detectedCurrentBranch
                     activeItems = collectedActive
                     mergedItems = collectedMerged
                     isLoading = false
+
+                    val latestVer = SemVerHelper.findHighestVersion(activeItems, mergedItems)
+                    val suggestion = SemVerHelper.suggestNext(latestVer)
+                    label.toolTipText = "FlowTags: $currentBranchName | Next: hotfix/${suggestion.nextHotfix}, release/${suggestion.nextMinorRelease}"
                 }
             }
 
@@ -1586,8 +1625,13 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
         val suggestion = SemVerHelper.suggestNext(latestVersionForBump)
 
         rootGroup.addSeparator("Suggested Next Versions (Click to Copy)")
-        rootGroup.add(createCopyAction("Next Hotfix:   ${suggestion.nextHotfix} (Patch)", suggestion.nextHotfix, FlowTagsIcons.Hotfix))
-        rootGroup.add(createCopyAction("Next Release:  ${suggestion.nextMinorRelease} (Minor)", suggestion.nextMinorRelease, FlowTagsIcons.Release))
+        if (isLoading && activeItems.isEmpty() && mergedItems.isEmpty()) {
+            rootGroup.add(createDisabledAction("Next Hotfix:   Calculating..."))
+            rootGroup.add(createDisabledAction("Next Release:  Calculating..."))
+        } else {
+            rootGroup.add(createCopyAction("Next Hotfix:   ${suggestion.nextHotfix} (Patch)", suggestion.nextHotfix, FlowTagsIcons.Hotfix))
+            rootGroup.add(createCopyAction("Next Release:  ${suggestion.nextMinorRelease} (Minor)", suggestion.nextMinorRelease, FlowTagsIcons.Release))
+        }
 
         // 3. 진행 중인(Active) 브랜치 목록 (클릭 시 버전 복사)
         rootGroup.addSeparator("Active Branches (Click to Copy)")
@@ -1994,6 +2038,21 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
                 updateStatusLabelWithBranch(currentBranch)
             }
         })
+
+        // VCS 리포지토리 매핑 등록/변경 감지 (프로젝트 오픈 시 Git 레포가 비동기로 로드될 때 발행됨)
+        connection.subscribe(VcsRepositoryManager.VCS_REPOSITORY_MAPPING_UPDATED, VcsRepositoryMappingListener {
+            loadGitVersions()
+        })
+
+        // VCS 설정 변경 감지
+        connection.subscribe(ProjectLevelVcsManager.VCS_CONFIGURATION_CHANGED, VcsListener {
+            loadGitVersions()
+        })
+
+        // 스마트 모드 진입 시 자동 확인
+        DumbService.getInstance(project).runWhenSmart {
+            loadGitVersions()
+        }
 
         loadGitVersions()
     }
@@ -2418,18 +2477,31 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
         popup.showUnderneathOf(gitFlowButton)
     }
 
-    fun loadGitVersions() {
+    fun loadGitVersions(attempt: Int = 0) {
         if (!refreshButton.isEnabled) {
             return
         }
+        if (project.isDisposed) return
 
         val repositoryManager = GitRepositoryManager.getInstance(project)
         val repositories = repositoryManager.repositories
 
         if (repositories.isEmpty()) {
-            statusLabel.text = "No Git repository found in project."
+            statusLabel.text = "Waiting for Git repository..."
             tableModel.rowCount = 0
             hasInitialLoaded = false
+            // 프로젝트 시작 시 비동기로 레포지토리가 로딩되는 동안 지연 재시도 (최대 5회)
+            if (attempt < 5) {
+                AppExecutorUtil.getAppScheduledExecutorService().schedule({
+                    ApplicationManager.getApplication().invokeLater {
+                        if (!project.isDisposed) {
+                            loadGitVersions(attempt + 1)
+                        }
+                    }
+                }, ((attempt + 1) * 1000L), TimeUnit.MILLISECONDS)
+            } else {
+                statusLabel.text = "No Git repository found in project."
+            }
             return
         }
 

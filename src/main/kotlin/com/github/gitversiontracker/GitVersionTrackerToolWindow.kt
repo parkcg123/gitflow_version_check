@@ -127,6 +127,7 @@ object SemVerHelper {
         val major: Int,
         val minor: Int,
         val patch: Int,
+        val delimiter: String = "",
         val suffix: String = "",
         val isNumericOnly: Boolean = false
     ) : Comparable<ParsedSemVer> {
@@ -138,7 +139,7 @@ object SemVerHelper {
         }
     }
 
-    private val SEMVER_REGEX = Regex("""^(v|V)?(\d+)\.(\d+)(?:\.(\d+))?(?:-([0-9a-zA-Z._]+))?$""")
+    private val SEMVER_REGEX = Regex("""^(v|V)?(\d+)\.(\d+)(?:\.(\d+))?(?:([-_])([0-9a-zA-Z._]+))?$""")
     private val PURE_NUMBER_REGEX = Regex("""^(v|V)?(\d+)$""")
 
     fun parseVersion(versionStr: String?): ParsedSemVer? {
@@ -150,14 +151,15 @@ object SemVerHelper {
             val major = match.groupValues[2].toIntOrNull() ?: 0
             val minor = match.groupValues[3].toIntOrNull() ?: 0
             val patch = match.groupValues[4].toIntOrNull() ?: 0
-            val suffix = match.groupValues[5]
-            return ParsedSemVer(trimmed, prefix, major, minor, patch, suffix)
+            val delimiter = match.groupValues[5]
+            val suffix = match.groupValues[6]
+            return ParsedSemVer(trimmed, prefix, major, minor, patch, delimiter, suffix)
         }
         val numMatch = PURE_NUMBER_REGEX.find(trimmed)
         if (numMatch != null) {
             val prefix = numMatch.groupValues[1]
             val num = numMatch.groupValues[2].toIntOrNull() ?: 0
-            return ParsedSemVer(trimmed, prefix, num, 0, 0, "", isNumericOnly = true)
+            return ParsedSemVer(trimmed, prefix, num, 0, 0, "", "", isNumericOnly = true)
         }
         return null
     }
@@ -186,10 +188,10 @@ object SemVerHelper {
     }
 
     fun suggestNext(latestVersion: String?): NextVersionSuggestion {
-        val todayStr = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)
+        val todayBasic = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) // e.g. 20261014
         if (latestVersion.isNullOrBlank()) {
             return NextVersionSuggestion(
-                nextHotfix = "1.0.1-$todayStr",
+                nextHotfix = "1.0.1_$todayBasic",
                 nextMinorRelease = "1.1.0",
                 nextMajorRelease = "2.0.0",
                 baseVersion = null
@@ -202,11 +204,34 @@ object SemVerHelper {
             val major = parsed.major
             val minor = parsed.minor
             val patch = parsed.patch
-            val hasDateSuffix = parsed.suffix.length == 8 && parsed.suffix.all { it.isDigit() }
 
-            val hotfixSuffix = if (hasDateSuffix) "-$todayStr" else ""
-            val nextHotfix = "$prefix$major.$minor.${patch + 1}$hotfixSuffix"
-            val nextMinor = "$prefix$major.${minor + 1}.0"
+            // Parse date and extra tags from suffix (e.g. "20260411clip", "20260411", "2026-04-11-tag")
+            val dateRegex = Regex("""^(\d{8}|\d{4}[-.]\d{1,2}[-.]\d{1,2})(.*)$""")
+            val dateMatch = if (parsed.suffix.isNotEmpty()) dateRegex.find(parsed.suffix) else null
+
+            val delimiter = if (parsed.delimiter.isNotEmpty()) parsed.delimiter else "_"
+
+            val (newHotfixSuffix, newReleaseSuffix) = if (dateMatch != null) {
+                val oldDate = dateMatch.groupValues[1]
+                val extraTag = dateMatch.groupValues[2] // e.g. "clip"
+                val todayFormatted = when {
+                    oldDate.contains("-") -> LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+                    oldDate.contains(".") -> LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy.MM.dd"))
+                    else -> todayBasic
+                }
+                val suffixWithDate = "$delimiter$todayFormatted$extraTag"
+                Pair(suffixWithDate, suffixWithDate)
+            } else if (parsed.suffix.isNotEmpty()) {
+                // If suffix has no date but has tag like "_clip", append today's date + keep tag
+                val suffixWithDate = "$delimiter${todayBasic}_${parsed.suffix}"
+                Pair(suffixWithDate, "$delimiter${parsed.suffix}")
+            } else {
+                // Clean version without suffix (e.g. "1.0.64")
+                Pair("$delimiter$todayBasic", "")
+            }
+
+            val nextHotfix = "$prefix$major.$minor.${patch + 1}$newHotfixSuffix"
+            val nextMinor = "$prefix$major.${minor + 1}.0$newReleaseSuffix"
             val nextMajor = "$prefix${major + 1}.0.0"
 
             return NextVersionSuggestion(nextHotfix, nextMinor, nextMajor, latestVersion)

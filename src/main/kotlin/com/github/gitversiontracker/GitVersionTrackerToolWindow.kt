@@ -205,33 +205,22 @@ object SemVerHelper {
             val minor = parsed.minor
             val patch = parsed.patch
 
-            // Parse date and extra tags from suffix (e.g. "20260411clip", "20260411", "2026-04-11-tag")
-            val dateRegex = Regex("""^(\d{8}|\d{4}[-.]\d{1,2}[-.]\d{1,2})(.*)$""")
-            val dateMatch = if (parsed.suffix.isNotEmpty()) dateRegex.find(parsed.suffix) else null
-
             val delimiter = if (parsed.delimiter.isNotEmpty()) parsed.delimiter else "_"
 
-            val (newHotfixSuffix, newReleaseSuffix) = if (dateMatch != null) {
-                val oldDate = dateMatch.groupValues[1]
-                val extraTag = dateMatch.groupValues[2] // e.g. "clip"
-                val todayFormatted = when {
-                    oldDate.contains("-") -> LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
-                    oldDate.contains(".") -> LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy.MM.dd"))
-                    else -> todayBasic
-                }
-                val suffixWithDate = "$delimiter$todayFormatted$extraTag"
-                Pair(suffixWithDate, suffixWithDate)
-            } else if (parsed.suffix.isNotEmpty()) {
-                // If suffix has no date but has tag like "_clip", append today's date + keep tag
-                val suffixWithDate = "$delimiter${todayBasic}_${parsed.suffix}"
-                Pair(suffixWithDate, "$delimiter${parsed.suffix}")
-            } else {
-                // Clean version without suffix (e.g. "1.0.64")
-                Pair("$delimiter$todayBasic", "")
+            // Determine today's date format (YYYY-MM-DD vs YYYY.MM.DD vs YYYYMMDD)
+            val todayFormatted = when {
+                parsed.suffix.contains("-") -> LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+                parsed.suffix.contains(".") -> LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy.MM.dd"))
+                else -> todayBasic // e.g. 20261014
             }
+            val dateSuffix = "$delimiter$todayFormatted"
 
-            val nextHotfix = "$prefix$major.$minor.${patch + 1}$newHotfixSuffix"
-            val nextMinor = "$prefix$major.${minor + 1}.0$newReleaseSuffix"
+            val nextHotfix = "$prefix$major.$minor.${patch + 1}$dateSuffix"
+            val nextMinor = if (parsed.suffix.isNotEmpty()) {
+                "$prefix$major.${minor + 1}.0$dateSuffix"
+            } else {
+                "$prefix$major.${minor + 1}.0"
+            }
             val nextMajor = "$prefix${major + 1}.0.0"
 
             return NextVersionSuggestion(nextHotfix, nextMinor, nextMajor, latestVersion)

@@ -1435,7 +1435,14 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
             loadGitVersions()
         }
 
-        loadGitVersions()
+        // 프로젝트 오픈 직후 IntelliJ가 Git 저장소를 백그라운드에서 정상 매핑할 수 있도록 1.5초 지연 후 최초 로드
+        AppExecutorUtil.getAppScheduledExecutorService().schedule({
+            ApplicationManager.getApplication().invokeLater {
+                if (!project.isDisposed) {
+                    loadGitVersions()
+                }
+            }
+        }, 1500L, TimeUnit.MILLISECONDS)
     }
 
     override fun getComponent(): JComponent = label
@@ -2054,7 +2061,14 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
             loadGitVersions()
         }
 
-        loadGitVersions()
+        // 프로젝트 오픈 직후 IntelliJ가 Git 저장소를 백그라운드에서 정상 매핑할 수 있도록 1.5초 지연 후 최초 로드
+        AppExecutorUtil.getAppScheduledExecutorService().schedule({
+            ApplicationManager.getApplication().invokeLater {
+                if (!project.isDisposed) {
+                    loadGitVersions()
+                }
+            }
+        }, 1500L, TimeUnit.MILLISECONDS)
     }
 
     private fun setupUI() {

@@ -301,7 +301,18 @@ object GitFlowHelper {
     }
 
     fun getPrimaryRepo(project: Project): GitRepository? {
-        return GitRepositoryManager.getInstance(project).repositories.firstOrNull()
+        val repoManager = GitRepositoryManager.getInstance(project)
+        val repos = repoManager.repositories
+        if (repos.isNotEmpty()) return repos.first()
+        val vcsRoots = ProjectLevelVcsManager.getInstance(project).allVcsRoots
+        for (vcsRoot in vcsRoots) {
+            val vFile = vcsRoot.path
+            if (vFile != null) {
+                val r = repoManager.getRepositoryForRoot(vFile)
+                if (r != null) return r
+            }
+        }
+        return null
     }
 
     fun getFetchHeadTimestamp(project: Project): Long {
@@ -1435,10 +1446,13 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
             loadGitVersions()
         }
 
-        // 프로젝트 오픈 직후 IntelliJ가 Git 저장소를 백그라운드에서 정상 매핑할 수 있도록 1.5초 지연 후 최초 로드
+        // 1. 즉시 1회 시도 (캐시된 레포가 있으면 즉시 로드)
+        loadGitVersions()
+
+        // 2. 프로젝트 오픈 직후 IntelliJ가 Git 저장소를 백그라운드에서 정상 매핑할 수 있도록 1.5초 지연 후 추가 확인
         AppExecutorUtil.getAppScheduledExecutorService().schedule({
             ApplicationManager.getApplication().invokeLater {
-                if (!project.isDisposed) {
+                if (!project.isDisposed && (!hasInitialLoaded || (activeItems.isEmpty() && mergedItems.isEmpty()))) {
                     loadGitVersions()
                 }
             }
@@ -1452,22 +1466,27 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
         if (project.isDisposed) return
 
         val repoManager = GitRepositoryManager.getInstance(project)
-        val repositories = repoManager.repositories
+        val repositories = repoManager.repositories.ifEmpty {
+            ProjectLevelVcsManager.getInstance(project).allVcsRoots.mapNotNull { root ->
+                root.path?.let { p -> repoManager.getRepositoryForRoot(p) }
+            }
+        }
         if (repositories.isEmpty()) {
             activeItems = emptyList()
             mergedItems = emptyList()
             currentBranchName = "no git"
             hasInitialLoaded = false
             label.toolTipText = "FlowTags - Waiting for Git repository..."
-            // 프로젝트 시작 시 비동기로 레포지토리가 로딩되는 동안 지연 재시도 (최대 5회)
-            if (attempt < 5) {
+            // 프로젝트 시작 시 비동기로 레포지토리가 로딩되는 동안 지연 재시도 (최대 8회, 최대 ~20초)
+            val delayMs = if (attempt < 3) 1000L else 2000L
+            if (attempt < 8) {
                 AppExecutorUtil.getAppScheduledExecutorService().schedule({
                     ApplicationManager.getApplication().invokeLater {
                         if (!project.isDisposed) {
                             loadGitVersions(attempt + 1)
                         }
                     }
-                }, ((attempt + 1) * 1000L), TimeUnit.MILLISECONDS)
+                }, delayMs, TimeUnit.MILLISECONDS)
             }
             return
         }
@@ -1505,14 +1524,44 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
                 var detectedCurrentBranch = "unknown"
 
                 for (repo in repositories) {
-                    val branchName = repo.currentBranchName
-                    if (branchName != null) {
+                    if (indicator.isCanceled) break
+
+                    // Git 저장소 내부 상태 동기화 (최신 브랜치/리비전 메모리 매핑)
+                    try {
+                        repo.update()
+                    } catch (_: Throwable) {}
+
+                    var branchName = repo.currentBranchName
+                    if (branchName.isNullOrBlank() || branchName == "HEAD") {
+                        val headFile = File(repo.root.path, ".git/HEAD")
+                        if (headFile.exists()) {
+                            try {
+                                val headText = headFile.readText().trim()
+                                if (headText.startsWith("ref: refs/heads/")) {
+                                    branchName = headText.removePrefix("ref: refs/heads/").trim()
+                                }
+                            } catch (_: Throwable) {}
+                        }
+                    }
+                    if (!branchName.isNullOrBlank()) {
                         detectedCurrentBranch = branchName
                     }
 
-                    // 1. 진행 중인(Active) 로컬 브랜치 탐색
-                    for (branch in repo.branches.localBranches) {
-                        val bName = branch.name
+                    // 1. 진행 중인(Active) 로컬 브랜치 탐색 (IntelliJ 캐시가 아직 안 찼을 경우 git branch --list 직접 조회 폴백)
+                    val localBranches = repo.branches.localBranches.map { it.name }.ifEmpty {
+                        try {
+                            val bHandler = GitLineHandler(project, repo.root, GitCommand.BRANCH)
+                            bHandler.addParameters("--list")
+                            val bResult = Git.getInstance().runCommand(bHandler)
+                            if (bResult.success()) {
+                                bResult.output.map { it.trim().removePrefix("*").trim() }.filter { it.isNotBlank() }
+                            } else emptyList()
+                        } catch (_: Throwable) {
+                            emptyList()
+                        }
+                    }
+
+                    for (bName in localBranches) {
                         if (!seenActiveBranches.add(bName)) continue
 
                         val match = activeRegex.find(bName)
@@ -2061,10 +2110,13 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
             loadGitVersions()
         }
 
-        // 프로젝트 오픈 직후 IntelliJ가 Git 저장소를 백그라운드에서 정상 매핑할 수 있도록 1.5초 지연 후 최초 로드
+        // 1. 즉시 1회 시도 (캐시된 레포가 있으면 즉시 로드)
+        loadGitVersions()
+
+        // 2. 프로젝트 오픈 직후 IntelliJ가 Git 저장소를 백그라운드에서 정상 매핑할 수 있도록 1.5초 지연 후 추가 확인
         AppExecutorUtil.getAppScheduledExecutorService().schedule({
             ApplicationManager.getApplication().invokeLater {
-                if (!project.isDisposed) {
+                if (!project.isDisposed && (!hasInitialLoaded || allItems.isEmpty())) {
                     loadGitVersions()
                 }
             }
@@ -2498,21 +2550,26 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
         if (project.isDisposed) return
 
         val repositoryManager = GitRepositoryManager.getInstance(project)
-        val repositories = repositoryManager.repositories
+        val repositories = repositoryManager.repositories.ifEmpty {
+            ProjectLevelVcsManager.getInstance(project).allVcsRoots.mapNotNull { root ->
+                root.path?.let { p -> repositoryManager.getRepositoryForRoot(p) }
+            }
+        }
 
         if (repositories.isEmpty()) {
             statusLabel.text = "Waiting for Git repository..."
             tableModel.rowCount = 0
             hasInitialLoaded = false
-            // 프로젝트 시작 시 비동기로 레포지토리가 로딩되는 동안 지연 재시도 (최대 5회)
-            if (attempt < 5) {
+            // 프로젝트 시작 시 비동기로 레포지토리가 로딩되는 동안 지연 재시도 (최대 8회, 최대 ~20초)
+            val delayMs = if (attempt < 3) 1000L else 2000L
+            if (attempt < 8) {
                 AppExecutorUtil.getAppScheduledExecutorService().schedule({
                     ApplicationManager.getApplication().invokeLater {
                         if (!project.isDisposed) {
                             loadGitVersions(attempt + 1)
                         }
                     }
-                }, ((attempt + 1) * 1000L), TimeUnit.MILLISECONDS)
+                }, delayMs, TimeUnit.MILLISECONDS)
             } else {
                 statusLabel.text = "No Git repository found in project."
             }
@@ -2558,10 +2615,39 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
                 for (repo in repositories) {
                     if (indicator.isCanceled) break
 
-                    // 1. 진행 중인(Active) 로컬 브랜치 탐색
-                    val repoCurrentBranch = repo.currentBranchName
-                    for (branch in repo.branches.localBranches) {
-                        val bName = branch.name
+                    // Git 저장소 내부 상태 동기화 (최신 브랜치/리비전 메모리 매핑)
+                    try {
+                        repo.update()
+                    } catch (_: Throwable) {}
+
+                    var repoCurrentBranch = repo.currentBranchName
+                    if (repoCurrentBranch.isNullOrBlank() || repoCurrentBranch == "HEAD") {
+                        val headFile = File(repo.root.path, ".git/HEAD")
+                        if (headFile.exists()) {
+                            try {
+                                val headText = headFile.readText().trim()
+                                if (headText.startsWith("ref: refs/heads/")) {
+                                    repoCurrentBranch = headText.removePrefix("ref: refs/heads/").trim()
+                                }
+                            } catch (_: Throwable) {}
+                        }
+                    }
+
+                    // 1. 진행 중인(Active) 로컬 브랜치 탐색 (IntelliJ 캐시가 아직 안 찼을 경우 git branch --list 직접 조회 폴백)
+                    val localBranches = repo.branches.localBranches.map { it.name }.ifEmpty {
+                        try {
+                            val bHandler = GitLineHandler(project, repo.root, GitCommand.BRANCH)
+                            bHandler.addParameters("--list")
+                            val bResult = Git.getInstance().runCommand(bHandler)
+                            if (bResult.success()) {
+                                bResult.output.map { it.trim().removePrefix("*").trim() }.filter { it.isNotBlank() }
+                            } else emptyList()
+                        } catch (_: Throwable) {
+                            emptyList()
+                        }
+                    }
+
+                    for (bName in localBranches) {
                         if (!seenActiveBranches.add(bName)) continue
 
                         val match = activeRegex.find(bName)

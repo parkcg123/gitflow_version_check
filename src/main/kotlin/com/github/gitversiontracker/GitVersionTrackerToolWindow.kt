@@ -308,6 +308,22 @@ object GitFlowHelper {
         val repo: GitRepository?
     )
 
+    fun findRepoForRoot(repoManager: GitRepositoryManager, vFile: VirtualFile): GitRepository? {
+        // 1. Direct in-memory lookup (0ms, 100% EDT safe, no synchronous updates)
+        val inMemory = repoManager.repositories.firstOrNull { it.root == vFile || it.root.path == vFile.path }
+        if (inMemory != null) return inMemory
+
+        // 2. Only invoke getRepositoryForRoot when running on a background thread
+        if (!ApplicationManager.getApplication().isDispatchThread) {
+            return try {
+                repoManager.getRepositoryForRoot(vFile)
+            } catch (_: Throwable) {
+                null
+            }
+        }
+        return null
+    }
+
     fun getAllGitRoots(project: Project): List<GitRootInfo> {
         val results = mutableListOf<GitRootInfo>()
         val seenPaths = mutableSetOf<String>()
@@ -327,7 +343,7 @@ object GitFlowHelper {
             val vFile = vcsRoot.path ?: continue
             val path = vFile.path
             if (seenPaths.add(path)) {
-                val repo = repoManager.getRepositoryForRoot(vFile)
+                val repo = findRepoForRoot(repoManager, vFile)
                 results.add(GitRootInfo(vFile, File(path), repo))
             }
         }
@@ -341,9 +357,9 @@ object GitFlowHelper {
             fun checkAndAdd(file: File) {
                 val gitDir = File(file, ".git")
                 if (gitDir.exists() && seenPaths.add(file.absolutePath)) {
-                    val vFile = lfs.findFileByIoFile(file) ?: lfs.refreshAndFindFileByIoFile(file)
+                    val vFile = lfs.findFileByIoFile(file) ?: lfs.findFileByPath(file.absolutePath)
                     if (vFile != null) {
-                        val repo = repoManager.getRepositoryForRoot(vFile)
+                        val repo = findRepoForRoot(repoManager, vFile)
                         results.add(GitRootInfo(vFile, file, repo))
                     }
                 }
@@ -366,14 +382,19 @@ object GitFlowHelper {
     }
 
     fun getPrimaryRepo(project: Project): GitRepository? {
+        val repoManager = GitRepositoryManager.getInstance(project)
+        val inMemory = repoManager.repositories
+        if (inMemory.isNotEmpty()) return inMemory.first()
+
         val roots = getAllGitRoots(project)
         val withRepo = roots.firstOrNull { it.repo != null }
         if (withRepo?.repo != null) return withRepo.repo
 
-        val repoManager = GitRepositoryManager.getInstance(project)
-        for (root in roots) {
-            val r = repoManager.getRepositoryForRoot(root.rootVirtualFile)
-            if (r != null) return r
+        if (!ApplicationManager.getApplication().isDispatchThread) {
+            for (root in roots) {
+                val r = try { repoManager.getRepositoryForRoot(root.rootVirtualFile) } catch (_: Throwable) { null }
+                if (r != null) return r
+            }
         }
         return null
     }

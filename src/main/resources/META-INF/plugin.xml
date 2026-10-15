@@ -30,6 +30,10 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h4>1.0.8</h4>
+    <ul>
+      <li>Fixed EDT assertion error 'Do not call synchronous repository update in EDT': eliminated synchronous repository queries on the UI dispatch thread when discovering multi-root repositories and initializing the status bar widget.</li>
+    </ul>
     <h4>1.0.7</h4>
     <ul>
       <li>Fixed multi-project and multi-window support: reliably discover repositories across multiple concurrently opened IntelliJ project windows, including multi-module and nested subdirectories (e.g. msp-*/.git).</li>

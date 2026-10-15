@@ -1592,6 +1592,8 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
                         "--pretty=format:%h%x09%cs%x09%s"
                     )
 
+                    val fallbackMergeRegex = Regex("""(?:^|\s|/|'|")((?:hotfix|release|feature)[0-9a-zA-Z._\-]*/|hotfix|release|feature)/([0-9a-zA-Z._\-]+)""")
+
                     val result = Git.getInstance().runCommand(handler)
                     if (result.success()) {
                         for (line in result.output) {
@@ -1601,11 +1603,27 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
                                 val commitDate = parts[1].trim()
                                 val subject = parts[2].trim()
 
+                                var branchType = ""
+                                var versionString = ""
                                 val matchResult = regex.find(subject)
                                 if (matchResult != null) {
-                                    val branchType = if (matchResult.groupValues.size > 2) matchResult.groupValues[1] else "custom"
-                                    val versionString = if (matchResult.groupValues.size > 2) matchResult.groupValues[2] else matchResult.groupValues[1]
+                                    branchType = if (matchResult.groupValues.size > 2) matchResult.groupValues[1] else "custom"
+                                    versionString = if (matchResult.groupValues.size > 2) matchResult.groupValues[2] else matchResult.groupValues[1]
+                                } else {
+                                    val fb = fallbackMergeRegex.find(subject)
+                                    if (fb != null) {
+                                        val rawType = fb.groupValues[1].removeSuffix("/").lowercase()
+                                        branchType = when {
+                                            rawType.contains("hotfix") -> "hotfix"
+                                            rawType.contains("release") -> "release"
+                                            rawType.contains("feature") -> "feature"
+                                            else -> "custom"
+                                        }
+                                        versionString = fb.groupValues[2].trimEnd('\'', '"', ')')
+                                    }
+                                }
 
+                                if (branchType.isNotBlank() && versionString.isNotBlank()) {
                                     collectedMerged.add(
                                         GitVersionItem(
                                             type = branchType,
@@ -1622,6 +1640,35 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
                             }
                         }
                     }
+
+                    // 3. Git Tags 탐색 (태그 기반 릴리즈 지원)
+                    try {
+                        val tagHandler = GitLineHandler(project, repo.root, GitCommand.TAG)
+                        tagHandler.addParameters("-l", "--sort=-creatordate")
+                        val tagResult = Git.getInstance().runCommand(tagHandler)
+                        if (tagResult.success()) {
+                            for (tag in tagResult.output) {
+                                val trimmedTag = tag.trim()
+                                if (trimmedTag.isNotBlank() && SemVerHelper.parseVersion(trimmedTag) != null) {
+                                    if (collectedMerged.none { it.version == trimmedTag }) {
+                                        val tType = if (trimmedTag.lowercase().contains("hotfix")) "hotfix" else "release"
+                                        collectedMerged.add(
+                                            GitVersionItem(
+                                                type = tType,
+                                                version = trimmedTag,
+                                                date = "Tag",
+                                                commitHash = "-",
+                                                rawSubject = "Tag: $trimmedTag",
+                                                isFinished = true,
+                                                isCurrent = false,
+                                                fullBranchName = trimmedTag
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_: Throwable) {}
                 }
 
                 ApplicationManager.getApplication().invokeLater {
@@ -1666,7 +1713,7 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
     }
 
     private fun showPopup() {
-        if (!hasInitialLoaded || (activeItems.isEmpty() && mergedItems.isEmpty())) {
+        if (!hasInitialLoaded) {
             loadGitVersions()
         }
 
@@ -1681,19 +1728,12 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
         val suggestion = SemVerHelper.suggestNext(latestVersionForBump)
 
         rootGroup.addSeparator("Suggested Next Versions (Click to Copy)")
-        if (isLoading && activeItems.isEmpty() && mergedItems.isEmpty()) {
-            rootGroup.add(createDisabledAction("Next Hotfix:   Calculating..."))
-            rootGroup.add(createDisabledAction("Next Release:  Calculating..."))
-        } else {
-            rootGroup.add(createCopyAction("Next Hotfix:   ${suggestion.nextHotfix} (Patch)", suggestion.nextHotfix, FlowTagsIcons.Hotfix))
-            rootGroup.add(createCopyAction("Next Release:  ${suggestion.nextMinorRelease} (Minor)", suggestion.nextMinorRelease, FlowTagsIcons.Release))
-        }
+        rootGroup.add(createCopyAction("Next Hotfix:   ${suggestion.nextHotfix} (Patch)", suggestion.nextHotfix, FlowTagsIcons.Hotfix))
+        rootGroup.add(createCopyAction("Next Release:  ${suggestion.nextMinorRelease} (Minor)", suggestion.nextMinorRelease, FlowTagsIcons.Release))
 
         // 3. 진행 중인(Active) 브랜치 목록 (클릭 시 버전 복사)
         rootGroup.addSeparator("Active Branches (Click to Copy)")
-        if (isLoading && activeItems.isEmpty() && mergedItems.isEmpty()) {
-            rootGroup.add(createDisabledAction("Loading Git versions..."))
-        } else if (activeItems.isEmpty()) {
+        if (activeItems.isEmpty()) {
             rootGroup.add(createDisabledAction("No active hotfix/release/feature branches"))
         } else {
             for (item in activeItems) {
@@ -2678,6 +2718,8 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
                         "--pretty=format:%h%x09%cs%x09%s"
                     )
 
+                    val fallbackMergeRegex = Regex("""(?:^|\s|/|'|")((?:hotfix|release|feature)[0-9a-zA-Z._\-]*/|hotfix|release|feature)/([0-9a-zA-Z._\-]+)""")
+
                     val result = Git.getInstance().runCommand(handler)
                     if (result.success()) {
                         for (line in result.output) {
@@ -2687,11 +2729,27 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
                                 val commitDate = parts[1].trim()
                                 val subject = parts[2].trim()
 
+                                var branchType = ""
+                                var versionString = ""
                                 val matchResult = regex.find(subject)
                                 if (matchResult != null) {
-                                    val branchType = if (matchResult.groupValues.size > 2) matchResult.groupValues[1] else "custom"
-                                    val versionString = if (matchResult.groupValues.size > 2) matchResult.groupValues[2] else matchResult.groupValues[1]
+                                    branchType = if (matchResult.groupValues.size > 2) matchResult.groupValues[1] else "custom"
+                                    versionString = if (matchResult.groupValues.size > 2) matchResult.groupValues[2] else matchResult.groupValues[1]
+                                } else {
+                                    val fb = fallbackMergeRegex.find(subject)
+                                    if (fb != null) {
+                                        val rawType = fb.groupValues[1].removeSuffix("/").lowercase()
+                                        branchType = when {
+                                            rawType.contains("hotfix") -> "hotfix"
+                                            rawType.contains("release") -> "release"
+                                            rawType.contains("feature") -> "feature"
+                                            else -> "custom"
+                                        }
+                                        versionString = fb.groupValues[2].trimEnd('\'', '"', ')')
+                                    }
+                                }
 
+                                if (branchType.isNotBlank() && versionString.isNotBlank()) {
                                     collectedItems.add(
                                         GitVersionItem(
                                             type = branchType,
@@ -2708,6 +2766,35 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
                             }
                         }
                     }
+
+                    // 3. Git Tags 탐색 (태그 기반 릴리즈 지원)
+                    try {
+                        val tagHandler = GitLineHandler(project, repo.root, GitCommand.TAG)
+                        tagHandler.addParameters("-l", "--sort=-creatordate")
+                        val tagResult = Git.getInstance().runCommand(tagHandler)
+                        if (tagResult.success()) {
+                            for (tag in tagResult.output) {
+                                val trimmedTag = tag.trim()
+                                if (trimmedTag.isNotBlank() && SemVerHelper.parseVersion(trimmedTag) != null) {
+                                    if (collectedItems.none { it.version == trimmedTag }) {
+                                        val tType = if (trimmedTag.lowercase().contains("hotfix")) "hotfix" else "release"
+                                        collectedItems.add(
+                                            GitVersionItem(
+                                                type = tType,
+                                                version = trimmedTag,
+                                                date = "Tag",
+                                                commitHash = "-",
+                                                rawSubject = "Tag: $trimmedTag",
+                                                isFinished = true,
+                                                isCurrent = false,
+                                                fullBranchName = trimmedTag
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_: Throwable) {}
                 }
 
                 ApplicationManager.getApplication().invokeLater {

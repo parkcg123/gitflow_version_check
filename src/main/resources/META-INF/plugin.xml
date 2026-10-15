@@ -30,6 +30,12 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h4>1.0.6</h4>
+    <ul>
+      <li>Fixed popup stuck on 'Calculating...': eliminated infinite re-query loop when no active branches exist, ensuring instant and clickable next version recommendations.</li>
+      <li>Added Git tag detection: automatically discover releases and tags (e.g. 1.0.64_20260411clip) even in repositories without traditional merge commits.</li>
+      <li>Added PR/MR merge commit support: recognize GitHub, GitLab, and Bitbucket pull request merges.</li>
+    </ul>
     <h4>1.0.5</h4>
     <ul>
       <li>Enhanced startup reliability: reliably auto-load versions on project open with 5-stage VCS discovery, repo.update synchronization, and fallback direct branch queries without requiring manual 'git pull'.</li>

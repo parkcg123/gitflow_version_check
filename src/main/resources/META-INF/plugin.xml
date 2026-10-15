@@ -30,6 +30,12 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h4>1.0.7</h4>
+    <ul>
+      <li>Fixed multi-project and multi-window support: reliably discover repositories across multiple concurrently opened IntelliJ project windows, including multi-module and nested subdirectories (e.g. msp-*/.git).</li>
+      <li>Added DumbAware background task execution: ensure version querying and Git operations run immediately without being suspended or blocked during IDE indexing.</li>
+      <li>Enabled status bar widget by default with instant .git/HEAD branch resolution and status bar repaint upon completion.</li>
+    </ul>
     <h4>1.0.6</h4>
     <ul>
       <li>Fixed popup stuck on 'Calculating...': eliminated infinite re-query loop when no active branches exist, ensuring instant and clickable next version recommendations.</li>

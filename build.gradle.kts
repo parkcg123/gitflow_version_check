@@ -21,7 +21,7 @@ plugins {
 }
 
 group = "com.github.parkcg123.flowtags"
-version = "1.0.6"
+version = "1.0.7"
 
 repositories {
     mavenCentral()

@@ -46,6 +46,8 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vcs.ProjectLevelVcsManager
 import com.intellij.openapi.vcs.VcsListener
 import com.intellij.openapi.vcs.changes.ChangeListManager
+import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.util.concurrency.AppExecutorUtil
 import java.util.concurrent.TimeUnit
 import com.intellij.openapi.wm.CustomStatusBarWidget
@@ -300,25 +302,181 @@ object GitFlowHelper {
         }
     }
 
-    fun getPrimaryRepo(project: Project): GitRepository? {
+    data class GitRootInfo(
+        val rootVirtualFile: VirtualFile,
+        val rootFile: File,
+        val repo: GitRepository?
+    )
+
+    fun getAllGitRoots(project: Project): List<GitRootInfo> {
+        val results = mutableListOf<GitRootInfo>()
+        val seenPaths = mutableSetOf<String>()
+
+        // 1. GitRepositoryManager.repositories (최우선)
         val repoManager = GitRepositoryManager.getInstance(project)
-        val repos = repoManager.repositories
-        if (repos.isNotEmpty()) return repos.first()
+        for (repo in repoManager.repositories) {
+            val path = repo.root.path
+            if (seenPaths.add(path)) {
+                results.add(GitRootInfo(repo.root, File(path), repo))
+            }
+        }
+
+        // 2. ProjectLevelVcsManager allVcsRoots
         val vcsRoots = ProjectLevelVcsManager.getInstance(project).allVcsRoots
         for (vcsRoot in vcsRoots) {
-            val vFile = vcsRoot.path
-            if (vFile != null) {
-                val r = repoManager.getRepositoryForRoot(vFile)
-                if (r != null) return r
+            val vFile = vcsRoot.path ?: continue
+            val path = vFile.path
+            if (seenPaths.add(path)) {
+                val repo = repoManager.getRepositoryForRoot(vFile)
+                results.add(GitRootInfo(vFile, File(path), repo))
             }
+        }
+
+        // 3. Filesystem fallback on project.basePath (멀티루트 서브디렉토리, 서브모듈 감지)
+        val basePath = project.basePath
+        if (!basePath.isNullOrBlank()) {
+            val baseDir = File(basePath)
+            val lfs = LocalFileSystem.getInstance()
+
+            fun checkAndAdd(file: File) {
+                val gitDir = File(file, ".git")
+                if (gitDir.exists() && seenPaths.add(file.absolutePath)) {
+                    val vFile = lfs.findFileByIoFile(file) ?: lfs.refreshAndFindFileByIoFile(file)
+                    if (vFile != null) {
+                        val repo = repoManager.getRepositoryForRoot(vFile)
+                        results.add(GitRootInfo(vFile, file, repo))
+                    }
+                }
+            }
+
+            // 프로젝트 루트 디렉토리
+            checkAndAdd(baseDir)
+
+            // 1-depth 서브디렉토리 (예: sedaily/msp-sedaily, atoo/nsp-atoo 등)
+            baseDir.listFiles()?.filter { it.isDirectory && !it.name.startsWith(".") }?.forEach { sub1 ->
+                checkAndAdd(sub1)
+                // 2-depth 서브디렉토리 (중첩 모듈)
+                sub1.listFiles()?.filter { it.isDirectory && !it.name.startsWith(".") }?.forEach { sub2 ->
+                    checkAndAdd(sub2)
+                }
+            }
+        }
+
+        return results
+    }
+
+    fun getPrimaryRepo(project: Project): GitRepository? {
+        val roots = getAllGitRoots(project)
+        val withRepo = roots.firstOrNull { it.repo != null }
+        if (withRepo?.repo != null) return withRepo.repo
+
+        val repoManager = GitRepositoryManager.getInstance(project)
+        for (root in roots) {
+            val r = repoManager.getRepositoryForRoot(root.rootVirtualFile)
+            if (r != null) return r
         }
         return null
     }
 
     fun getFetchHeadTimestamp(project: Project): Long {
-        val repo = getPrimaryRepo(project) ?: return -1L
-        val fetchHead = File(repo.root.path, ".git/FETCH_HEAD")
-        return if (fetchHead.exists()) fetchHead.lastModified() else 0L
+        val roots = getAllGitRoots(project)
+        if (roots.isEmpty()) return -1L
+        var maxTime = 0L
+        for (root in roots) {
+            val gitDir = File(root.rootFile, ".git")
+            val fetchHead = if (gitDir.isDirectory) {
+                File(gitDir, "FETCH_HEAD")
+            } else if (gitDir.isFile) {
+                val line = try { gitDir.readLines().firstOrNull { it.startsWith("gitdir:") } } catch (_: Throwable) { null }
+                if (line != null) {
+                    val targetPath = line.substringAfter("gitdir:").trim()
+                    val resolved = if (File(targetPath).isAbsolute) File(targetPath) else File(root.rootFile, targetPath)
+                    File(resolved, "FETCH_HEAD")
+                } else null
+            } else null
+
+            if (fetchHead != null && fetchHead.exists()) {
+                val t = fetchHead.lastModified()
+                if (t > maxTime) maxTime = t
+            }
+        }
+        return maxTime
+    }
+
+    fun getCurrentBranchName(project: Project, root: GitRootInfo): String? {
+        val repoBranch = root.repo?.currentBranchName
+        if (!repoBranch.isNullOrBlank() && repoBranch != "HEAD") {
+            return repoBranch
+        }
+
+        // Direct .git/HEAD parse (0ms, 100% EDT safe)
+        val gitDir = File(root.rootFile, ".git")
+        val headFile = if (gitDir.isDirectory) {
+            File(gitDir, "HEAD")
+        } else if (gitDir.isFile) {
+            try {
+                val line = gitDir.readLines().firstOrNull { it.startsWith("gitdir:") }
+                if (line != null) {
+                    val targetPath = line.substringAfter("gitdir:").trim()
+                    val resolved = if (File(targetPath).isAbsolute) File(targetPath) else File(root.rootFile, targetPath)
+                    File(resolved, "HEAD")
+                } else null
+            } catch (_: Throwable) { null }
+        } else null
+
+        if (headFile != null && headFile.exists()) {
+            try {
+                val headText = headFile.readText().trim()
+                if (headText.startsWith("ref: refs/heads/")) {
+                    val b = headText.removePrefix("ref: refs/heads/").trim()
+                    if (b.isNotBlank()) return b
+                }
+            } catch (_: Throwable) {}
+        }
+
+        if (!ApplicationManager.getApplication().isDispatchThread) {
+            try {
+                val handler = GitLineHandler(project, root.rootVirtualFile, GitCommand.REV_PARSE)
+                handler.addParameters("--abbrev-ref", "HEAD")
+                val res = Git.getInstance().runCommand(handler)
+                if (res.success()) {
+                    val out = res.outputAsJoinedString.trim()
+                    if (out.isNotBlank() && out != "HEAD") return out
+                }
+            } catch (_: Throwable) {}
+        }
+
+        return root.repo?.currentBranchName
+    }
+
+    fun getLocalBranches(project: Project, root: GitRootInfo): List<String> {
+        val fromRepo = root.repo?.branches?.localBranches?.map { it.name }
+        if (!fromRepo.isNullOrEmpty()) {
+            return fromRepo
+        }
+
+        try {
+            val bHandler = GitLineHandler(project, root.rootVirtualFile, GitCommand.BRANCH)
+            bHandler.addParameters("--list")
+            val bResult = Git.getInstance().runCommand(bHandler)
+            if (bResult.success()) {
+                val branches = bResult.output.map { it.trim().removePrefix("*").trim() }.filter { it.isNotBlank() }
+                if (branches.isNotEmpty()) return branches
+            }
+        } catch (_: Throwable) {}
+
+        val gitDir = File(root.rootFile, ".git")
+        val refsHeads = if (gitDir.isDirectory) File(gitDir, "refs/heads") else null
+        if (refsHeads != null && refsHeads.exists()) {
+            val branchList = mutableListOf<String>()
+            refsHeads.walkTopDown().filter { it.isFile }.forEach { f ->
+                val rel = f.relativeTo(refsHeads).path.replace('\\', '/')
+                if (rel.isNotBlank()) branchList.add(rel)
+            }
+            if (branchList.isNotEmpty()) return branchList
+        }
+
+        return emptyList()
     }
 
     fun buildRegexPattern(hotfixPrefix: String, releasePrefix: String, featurePrefix: String): String {
@@ -519,27 +677,40 @@ object GitFlowHelper {
     }
 
     fun pullAndRefresh(project: Project, onFinished: (() -> Unit)? = null) {
-        val repo = getPrimaryRepo(project) ?: run {
+        val roots = getAllGitRoots(project)
+        if (roots.isEmpty()) {
             notifyMessage(project, "No Git repository found in project.", NotificationType.ERROR)
             return
         }
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Running Git Pull...", false) {
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Running Git Pull...", false), DumbAware {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
                 indicator.text = "Executing git pull..."
 
-                val handler = GitLineHandler(project, repo.root, GitCommand.PULL)
-                val result = Git.getInstance().runCommand(handler)
-                repo.update()
+                var anySuccess = false
+                var lastError: String? = null
+                for (root in roots) {
+                    val handler = GitLineHandler(project, root.rootVirtualFile, GitCommand.PULL)
+                    val result = Git.getInstance().runCommand(handler)
+                    try {
+                        root.repo?.update()
+                    } catch (_: Throwable) {}
 
-                if (result.success()) {
+                    if (result.success()) {
+                        anySuccess = true
+                    } else {
+                        lastError = result.errorOutputAsJoinedString
+                    }
+                }
+
+                if (anySuccess) {
                     notifyMessage(project, "Git Pull completed successfully. Versions updated.", NotificationType.INFORMATION)
                     ApplicationManager.getApplication().invokeLater {
                         onFinished?.invoke()
                     }
                 } else {
-                    notifyMessage(project, "Git Pull failed: ${result.errorOutputAsJoinedString}", NotificationType.ERROR)
+                    notifyMessage(project, "Git Pull failed: ${lastError ?: "Unknown error"}", NotificationType.ERROR)
                 }
             }
         })
@@ -551,7 +722,7 @@ object GitFlowHelper {
             return
         }
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Checking out $branchName...", false) {
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Checking out $branchName...", false), DumbAware {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
                 if (!isWorkingTreeClean(project, repo)) {
@@ -562,7 +733,9 @@ object GitFlowHelper {
                 val handler = GitLineHandler(project, repo.root, GitCommand.CHECKOUT)
                 handler.addParameters(branchName)
                 val result = Git.getInstance().runCommand(handler)
-                repo.update()
+                try {
+                    repo.update()
+                } catch (_: Throwable) {}
 
                 if (result.success()) {
                     notifyMessage(project, "Switched to branch '$branchName'.", NotificationType.INFORMATION)
@@ -591,7 +764,7 @@ object GitFlowHelper {
             return
         }
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Initializing GitFlow...", false) {
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Initializing GitFlow...", false), DumbAware {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
 
@@ -723,7 +896,7 @@ object GitFlowHelper {
         }
         val newBranchName = "$prefix$identifier"
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Starting GitFlow $branchType ($newBranchName)...", false) {
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Starting GitFlow $branchType ($newBranchName)...", false), DumbAware {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
 
@@ -784,7 +957,7 @@ object GitFlowHelper {
         }
         val identifier = branchName.substringAfter('/')
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Finishing GitFlow branch '$branchName'...", false) {
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Finishing GitFlow branch '$branchName'...", false), DumbAware {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
 
@@ -1368,6 +1541,8 @@ class GitVersionTrackerWidgetFactory : StatusBarWidgetFactory {
         Disposer.dispose(widget)
     }
     override fun canBeEnabledOn(statusBar: StatusBar): Boolean = true
+    override fun isEnabledByDefault(): Boolean = true
+    override fun isConfigurable(): Boolean = true
 }
 
 /**
@@ -1465,21 +1640,16 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
         if (isLoading) return
         if (project.isDisposed) return
 
-        val repoManager = GitRepositoryManager.getInstance(project)
-        val repositories = repoManager.repositories.ifEmpty {
-            ProjectLevelVcsManager.getInstance(project).allVcsRoots.mapNotNull { root ->
-                root.path?.let { p -> repoManager.getRepositoryForRoot(p) }
-            }
-        }
-        if (repositories.isEmpty()) {
+        val gitRoots = GitFlowHelper.getAllGitRoots(project)
+        if (gitRoots.isEmpty()) {
             activeItems = emptyList()
             mergedItems = emptyList()
             currentBranchName = "no git"
             hasInitialLoaded = false
             label.toolTipText = "FlowTags - Waiting for Git repository..."
-            // 프로젝트 시작 시 비동기로 레포지토리가 로딩되는 동안 지연 재시도 (최대 8회, 최대 ~20초)
+            // 프로젝트 시작 시 비동기로 레포지토리가 로딩되는 동안 지연 재시도 (최대 10회)
             val delayMs = if (attempt < 3) 1000L else 2000L
-            if (attempt < 8) {
+            if (attempt < 10) {
                 AppExecutorUtil.getAppScheduledExecutorService().schedule({
                     ApplicationManager.getApplication().invokeLater {
                         if (!project.isDisposed) {
@@ -1492,10 +1662,13 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
         }
 
         hasInitialLoaded = true
-        val currentRepo = repositories.firstOrNull()
-        if (currentRepo != null) {
-            currentBranchName = currentRepo.currentBranchName ?: "unknown"
-            lastKnownRevision = currentRepo.currentRevision
+        val primaryRoot = gitRoots.firstOrNull()
+        if (primaryRoot != null) {
+            val detected = GitFlowHelper.getCurrentBranchName(project, primaryRoot)
+            if (!detected.isNullOrBlank()) {
+                currentBranchName = detected
+            }
+            lastKnownRevision = primaryRoot.repo?.currentRevision
         }
 
         val settings = GitVersionTrackerSettings.getInstance(project)
@@ -1515,7 +1688,7 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
         isLoading = true
         ProgressManager.getInstance().run(object : Task.Backgroundable(
             project, "Loading Git Branch Versions...", false
-        ) {
+        ), DumbAware {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
                 val collectedActive = mutableListOf<GitVersionItem>()
@@ -1523,44 +1696,21 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
                 val seenActiveBranches = mutableSetOf<String>()
                 var detectedCurrentBranch = "unknown"
 
-                for (repo in repositories) {
+                for (root in gitRoots) {
                     if (indicator.isCanceled) break
 
-                    // Git 저장소 내부 상태 동기화 (최신 브랜치/리비전 메모리 매핑)
+                    // Git 저장소 내부 상태 동기화
                     try {
-                        repo.update()
+                        root.repo?.update()
                     } catch (_: Throwable) {}
 
-                    var branchName = repo.currentBranchName
-                    if (branchName.isNullOrBlank() || branchName == "HEAD") {
-                        val headFile = File(repo.root.path, ".git/HEAD")
-                        if (headFile.exists()) {
-                            try {
-                                val headText = headFile.readText().trim()
-                                if (headText.startsWith("ref: refs/heads/")) {
-                                    branchName = headText.removePrefix("ref: refs/heads/").trim()
-                                }
-                            } catch (_: Throwable) {}
-                        }
-                    }
+                    val branchName = GitFlowHelper.getCurrentBranchName(project, root)
                     if (!branchName.isNullOrBlank()) {
                         detectedCurrentBranch = branchName
                     }
 
-                    // 1. 진행 중인(Active) 로컬 브랜치 탐색 (IntelliJ 캐시가 아직 안 찼을 경우 git branch --list 직접 조회 폴백)
-                    val localBranches = repo.branches.localBranches.map { it.name }.ifEmpty {
-                        try {
-                            val bHandler = GitLineHandler(project, repo.root, GitCommand.BRANCH)
-                            bHandler.addParameters("--list")
-                            val bResult = Git.getInstance().runCommand(bHandler)
-                            if (bResult.success()) {
-                                bResult.output.map { it.trim().removePrefix("*").trim() }.filter { it.isNotBlank() }
-                            } else emptyList()
-                        } catch (_: Throwable) {
-                            emptyList()
-                        }
-                    }
-
+                    // 1. 진행 중인(Active) 로컬 브랜치 탐색
+                    val localBranches = GitFlowHelper.getLocalBranches(project, root)
                     for (bName in localBranches) {
                         if (!seenActiveBranches.add(bName)) continue
 
@@ -1574,7 +1724,7 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
                                     type = branchType,
                                     version = identifier,
                                     date = if (isCurr) "Active (Current)" else "Active",
-                                    commitHash = if (isCurr) (repo.currentRevision?.take(7) ?: "-") else "-",
+                                    commitHash = if (isCurr) (root.repo?.currentRevision?.take(7) ?: "-") else "-",
                                     rawSubject = if (isCurr) "Current branch ($bName) 🌿" else "Active branch ($bName)",
                                     isFinished = false,
                                     isCurrent = isCurr,
@@ -1585,7 +1735,7 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
                     }
 
                     // 2. 종료된(Merged) 커밋 로그 탐색
-                    val handler = GitLineHandler(project, repo.root, GitCommand.LOG)
+                    val handler = GitLineHandler(project, root.rootVirtualFile, GitCommand.LOG)
                     handler.addParameters(
                         "-n", "500",
                         "--merges",
@@ -1643,7 +1793,7 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
 
                     // 3. Git Tags 탐색 (태그 기반 릴리즈 지원)
                     try {
-                        val tagHandler = GitLineHandler(project, repo.root, GitCommand.TAG)
+                        val tagHandler = GitLineHandler(project, root.rootVirtualFile, GitCommand.TAG)
                         tagHandler.addParameters("-l", "--sort=-creatordate")
                         val tagResult = Git.getInstance().runCommand(tagHandler)
                         if (tagResult.success()) {
@@ -1681,7 +1831,12 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
                     val latestVer = SemVerHelper.findHighestVersion(activeItems, mergedItems)
                     val suggestion = SemVerHelper.suggestNext(latestVer)
                     label.toolTipText = "FlowTags: $currentBranchName | Next: hotfix/${suggestion.nextHotfix}, release/${suggestion.nextMinorRelease}"
+                    myStatusBar?.updateWidget(ID())
                 }
+            }
+
+            override fun onFinished() {
+                isLoading = false
             }
 
             override fun onCancel() {
@@ -2475,8 +2630,9 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
             }
         })
 
-        val repo = GitFlowHelper.getPrimaryRepo(project)
-        val currentBranch = repo?.currentBranchName ?: ""
+        val primaryRoot = GitFlowHelper.getAllGitRoots(project).firstOrNull()
+        val currentBranch = (if (primaryRoot != null) GitFlowHelper.getCurrentBranchName(project, primaryRoot) else null)
+            ?: GitFlowHelper.getPrimaryRepo(project)?.currentBranchName ?: ""
         val canFinishCurrent = currentBranch.startsWith("hotfix/") ||
                 currentBranch.startsWith("release/") ||
                 currentBranch.startsWith("feature/")
@@ -2589,20 +2745,14 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
         }
         if (project.isDisposed) return
 
-        val repositoryManager = GitRepositoryManager.getInstance(project)
-        val repositories = repositoryManager.repositories.ifEmpty {
-            ProjectLevelVcsManager.getInstance(project).allVcsRoots.mapNotNull { root ->
-                root.path?.let { p -> repositoryManager.getRepositoryForRoot(p) }
-            }
-        }
-
-        if (repositories.isEmpty()) {
+        val gitRoots = GitFlowHelper.getAllGitRoots(project)
+        if (gitRoots.isEmpty()) {
             statusLabel.text = "Waiting for Git repository..."
             tableModel.rowCount = 0
             hasInitialLoaded = false
-            // 프로젝트 시작 시 비동기로 레포지토리가 로딩되는 동안 지연 재시도 (최대 8회, 최대 ~20초)
+            // 프로젝트 시작 시 비동기로 레포지토리가 로딩되는 동안 지연 재시도 (최대 10회)
             val delayMs = if (attempt < 3) 1000L else 2000L
-            if (attempt < 8) {
+            if (attempt < 10) {
                 AppExecutorUtil.getAppScheduledExecutorService().schedule({
                     ApplicationManager.getApplication().invokeLater {
                         if (!project.isDisposed) {
@@ -2617,10 +2767,13 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
         }
 
         hasInitialLoaded = true
-        val currentRepo = repositories.firstOrNull()
-        if (currentRepo != null) {
-            lastKnownBranch = currentRepo.currentBranchName
-            lastKnownRevision = currentRepo.currentRevision
+        val primaryRoot = gitRoots.firstOrNull()
+        if (primaryRoot != null) {
+            val detected = GitFlowHelper.getCurrentBranchName(project, primaryRoot)
+            if (!detected.isNullOrBlank()) {
+                lastKnownBranch = detected
+            }
+            lastKnownRevision = primaryRoot.repo?.currentRevision
         }
 
         val selectedLimit = limitCombo.selectedItem as? Int ?: 500
@@ -2644,7 +2797,7 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(
             project, "Loading Git Version History...", true
-        ) {
+        ), DumbAware {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
                 indicator.text = "Querying Git branches & logs..."
@@ -2652,41 +2805,18 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
                 val collectedItems = mutableListOf<GitVersionItem>()
                 val seenActiveBranches = mutableSetOf<String>()
 
-                for (repo in repositories) {
+                for (root in gitRoots) {
                     if (indicator.isCanceled) break
 
-                    // Git 저장소 내부 상태 동기화 (최신 브랜치/리비전 메모리 매핑)
+                    // Git 저장소 내부 상태 동기화
                     try {
-                        repo.update()
+                        root.repo?.update()
                     } catch (_: Throwable) {}
 
-                    var repoCurrentBranch = repo.currentBranchName
-                    if (repoCurrentBranch.isNullOrBlank() || repoCurrentBranch == "HEAD") {
-                        val headFile = File(repo.root.path, ".git/HEAD")
-                        if (headFile.exists()) {
-                            try {
-                                val headText = headFile.readText().trim()
-                                if (headText.startsWith("ref: refs/heads/")) {
-                                    repoCurrentBranch = headText.removePrefix("ref: refs/heads/").trim()
-                                }
-                            } catch (_: Throwable) {}
-                        }
-                    }
+                    val repoCurrentBranch = GitFlowHelper.getCurrentBranchName(project, root) ?: "unknown"
 
-                    // 1. 진행 중인(Active) 로컬 브랜치 탐색 (IntelliJ 캐시가 아직 안 찼을 경우 git branch --list 직접 조회 폴백)
-                    val localBranches = repo.branches.localBranches.map { it.name }.ifEmpty {
-                        try {
-                            val bHandler = GitLineHandler(project, repo.root, GitCommand.BRANCH)
-                            bHandler.addParameters("--list")
-                            val bResult = Git.getInstance().runCommand(bHandler)
-                            if (bResult.success()) {
-                                bResult.output.map { it.trim().removePrefix("*").trim() }.filter { it.isNotBlank() }
-                            } else emptyList()
-                        } catch (_: Throwable) {
-                            emptyList()
-                        }
-                    }
-
+                    // 1. 진행 중인(Active) 로컬 브랜치 탐색
+                    val localBranches = GitFlowHelper.getLocalBranches(project, root)
                     for (bName in localBranches) {
                         if (!seenActiveBranches.add(bName)) continue
 
@@ -2700,7 +2830,7 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
                                     type = branchType,
                                     version = identifier,
                                     date = if (isCurr) "Active (Current)" else "Active",
-                                    commitHash = if (isCurr) (repo.currentRevision?.take(7) ?: "-") else "-",
+                                    commitHash = if (isCurr) (root.repo?.currentRevision?.take(7) ?: "-") else "-",
                                     rawSubject = if (isCurr) "Current branch ($bName) 🌿" else "Active branch ($bName)",
                                     isFinished = false,
                                     isCurrent = isCurr,
@@ -2711,7 +2841,7 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
                     }
 
                     // 2. 종료된(Merged) 커밋 로그 탐색
-                    val handler = GitLineHandler(project, repo.root, GitCommand.LOG)
+                    val handler = GitLineHandler(project, root.rootVirtualFile, GitCommand.LOG)
                     handler.addParameters(
                         "-n", selectedLimit.toString(),
                         "--merges",
@@ -2767,9 +2897,9 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
                         }
                     }
 
-                    // 3. Git Tags 탐색 (태그 기반 릴리즈 지원)
+                    // 3. Git Tags 탐색
                     try {
-                        val tagHandler = GitLineHandler(project, repo.root, GitCommand.TAG)
+                        val tagHandler = GitLineHandler(project, root.rootVirtualFile, GitCommand.TAG)
                         tagHandler.addParameters("-l", "--sort=-creatordate")
                         val tagResult = Git.getInstance().runCommand(tagHandler)
                         if (tagResult.success()) {
@@ -2802,6 +2932,13 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
                     refreshButton.isEnabled = true
                     pullButton.isEnabled = true
                     applyFilter()
+                }
+            }
+
+            override fun onFinished() {
+                ApplicationManager.getApplication().invokeLater {
+                    refreshButton.isEnabled = true
+                    pullButton.isEnabled = true
                 }
             }
 
@@ -2863,7 +3000,10 @@ class GitVersionTrackerPanel(private val project: Project) : JPanel(BorderLayout
         val mergedCount = allItems.count { it.isFinished }
         val latestVer = SemVerHelper.findHighestVersionFromItems(allItems)
         val suggestion = SemVerHelper.suggestNext(latestVer)
-        val currentBranch = GitFlowHelper.getPrimaryRepo(project)?.currentBranchName ?: "HEAD"
+        val primaryRoot = GitFlowHelper.getAllGitRoots(project).firstOrNull()
+        val currentBranch = (if (primaryRoot != null) GitFlowHelper.getCurrentBranchName(project, primaryRoot) else null)
+            ?: GitFlowHelper.getPrimaryRepo(project)?.currentBranchName
+            ?: "HEAD"
 
         statusLabel.text = "Current: $currentBranch | Showing ${filtered.size} items (Active: $activeCount, Merged: $mergedCount) | Next: hotfix/${suggestion.nextHotfix}, release/${suggestion.nextMinorRelease}"
     }

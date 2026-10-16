@@ -22,7 +22,7 @@
     <h3>FlowTags - GitFlow & Semantic Version Manager</h3>
     <p>Seamlessly manage GitFlow branching lifecycles and automatically track Semantic Versioning (SemVer) directly inside IntelliJ IDEA.</p>
     <ul>
-      <li><b>Status Bar & ToolWindow:</b> Quick access to active branches, latest merged versions, and one-click copy.</li>
+      <li><b>Status Bar Widget:</b> Quick access to active branches, latest merged versions, version history, and one-click copy.</li>
       <li><b>Next Version Suggestion:</b> Automatically calculates and suggests next Hotfix (+patch) and Release (+minor) versions by analyzing both commit history and active branches.</li>
       <li><b>Full GitFlow Support:</b> Built-in Init, Start (Hotfix/Release/Feature), and Finish with automatic branch merging and cleanup.</li>
       <li><b>Conflict & Safety Checks:</b> Prevents actions when uncommitted changes exist, alerts on merge conflicts.</li>
@@ -33,6 +33,7 @@
     <h4>1.0.8</h4>
     <ul>
       <li>Fixed EDT assertion error 'Do not call synchronous repository update in EDT': eliminated synchronous repository queries on the UI dispatch thread when discovering multi-root repositories and initializing the status bar widget.</li>
+      <li>Removed redundant left/bottom ToolWindow panel to keep the IDE layout clean and lightweight, consolidating all features into the bottom-right Status Bar widget popup.</li>
     </ul>
     <h4>1.0.7</h4>
     <ul>
@@ -88,10 +89,6 @@
         <projectService serviceImplementation="com.github.gitversiontracker.GitVersionTrackerSettings"/>
         <statusBarWidgetFactory id="GitVersionTrackerWidget"
                                 implementation="com.github.gitversiontracker.GitVersionTrackerWidgetFactory"/>
-        <toolWindow id="FlowTags"
-                    anchor="bottom"
-                    factoryClass="com.github.gitversiontracker.GitVersionTrackerToolWindowFactory"
-                    icon="/icons/flowTags.svg"/>
         <notificationGroup id="Git Version Tracker Notifications"
                            displayType="BALLOON"/>
     </extensions>

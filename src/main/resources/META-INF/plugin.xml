@@ -30,10 +30,14 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h4>1.0.9</h4>
+    <ul>
+      <li>Removed redundant left/bottom ToolWindow history panel to keep the IDE layout clean and lightweight, consolidating all features into the bottom-right Status Bar widget popup.</li>
+      <li>Fixed EDT assertion error 'Do not call synchronous repository update in EDT': eliminated synchronous repository queries on the UI dispatch thread when discovering multi-root repositories.</li>
+    </ul>
     <h4>1.0.8</h4>
     <ul>
-      <li>Fixed EDT assertion error 'Do not call synchronous repository update in EDT': eliminated synchronous repository queries on the UI dispatch thread when discovering multi-root repositories and initializing the status bar widget.</li>
-      <li>Removed redundant left/bottom ToolWindow panel to keep the IDE layout clean and lightweight, consolidating all features into the bottom-right Status Bar widget popup.</li>
+      <li>Fixed EDT assertion error 'Do not call synchronous repository update in EDT' during status bar initialization.</li>
     </ul>
     <h4>1.0.7</h4>
     <ul>

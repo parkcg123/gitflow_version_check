@@ -30,6 +30,13 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h4>1.0.10</h4>
+    <ul>
+      <li>Added explicit <code>com.intellij.modules.vcs</code> and optional <code>com.intellij.platform.vcs</code> dependencies for full IntelliJ Platform 2026.3+ modular VCS compatibility.</li>
+      <li>Modernized build toolchain to IntelliJ Platform Gradle Plugin 2.x, Gradle 9, and Kotlin 2.2, removing redundant bundled kotlin-stdlib for a lighter plugin package.</li>
+      <li>Adopted open-ended IDE compatibility (2023.3+) and explicit ActionUpdateThread.BGT for popup actions.</li>
+      <li>Added automated GitHub Actions CI verification and JetBrains Marketplace deployment pipeline.</li>
+    </ul>
     <h4>1.0.9</h4>
     <ul>
       <li>Removed redundant left/bottom ToolWindow history panel to keep the IDE layout clean and lightweight, consolidating all features into the bottom-right Status Bar widget popup.</li>
@@ -87,6 +94,8 @@
     ]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.vcs</depends>
+    <depends optional="true" config-file="flowtags-vcs.xml">com.intellij.platform.vcs</depends>
     <depends>Git4Idea</depends>
 
     <extensions defaultExtensionNs="com.intellij">

@@ -14,50 +14,84 @@
  * limitations under the License.
  */
 
+import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
+import org.jetbrains.intellij.platform.gradle.models.ProductRelease
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
+
 plugins {
     id("java")
-    kotlin("jvm") version "1.9.22"
-    id("org.jetbrains.intellij") version "1.17.4"
+    kotlin("jvm") version "2.2.21"
+    id("org.jetbrains.intellij.platform") version "2.20.1"
 }
 
-group = "com.github.parkcg123.flowtags"
-version = "1.0.9"
+group = providers.gradleProperty("pluginGroup").get()
+version = providers.gradleProperty("pluginVersion").get()
 
 repositories {
     mavenCentral()
+    intellijPlatform {
+        defaultRepositories()
+    }
 }
 
-java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+dependencies {
+    intellijPlatform {
+        create(
+            providers.gradleProperty("platformType"),
+            providers.gradleProperty("platformVersion")
+        )
+        bundledPlugin("Git4Idea")
+    }
 }
 
-intellij {
-    version.set("2024.1.7")
-    type.set("IC")
-    plugins.set(listOf("Git4Idea"))
+fun nonBlankEnv(name: String) = providers.environmentVariable(name).flatMap { raw ->
+    providers.provider { raw.trim().takeIf { it.isNotEmpty() } }
+}
+
+intellijPlatform {
+    buildSearchableOptions.set(false)
+
+    pluginConfiguration {
+        version.set(providers.gradleProperty("pluginVersion"))
+        ideaVersion {
+            sinceBuild.set(providers.gradleProperty("pluginSinceBuild"))
+            untilBuild.set(provider { null })
+        }
+    }
+
+    signing {
+        certificateChain.set(nonBlankEnv("CERTIFICATE_CHAIN"))
+        privateKey.set(nonBlankEnv("PRIVATE_KEY"))
+        password.set(nonBlankEnv("PRIVATE_KEY_PASSWORD"))
+    }
+
+    publishing {
+        token.set(nonBlankEnv("PUBLISH_TOKEN"))
+    }
+
+    pluginVerification {
+        ides {
+            create("IC", "2023.3.8")
+            current()
+            select {
+                types.set(listOf(IntelliJPlatformType.IntellijIdea))
+                channels.set(listOf(ProductRelease.Channel.RELEASE, ProductRelease.Channel.EAP))
+                sinceBuild.set("263")
+            }
+        }
+    }
 }
 
 tasks {
-    patchPluginXml {
-        sinceBuild.set("233")
-        untilBuild.set("271.*")
-    }
-
-    buildSearchableOptions {
-        enabled = false
-    }
-
     withType<JavaCompile> {
-        sourceCompatibility = "17"
-        targetCompatibility = "17"
+        options.release.set(17)
     }
+}
 
-    compileKotlin {
-        kotlinOptions.jvmTarget = "17"
-    }
-
-    compileTestKotlin {
-        kotlinOptions.jvmTarget = "17"
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+        apiVersion.set(KotlinVersion.KOTLIN_1_9)
     }
 }

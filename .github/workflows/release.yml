@@ -1,0 +1,80 @@
+name: Release & Publish Plugin
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      skip_github_release:
+        description: 'Skip creating GitHub Release'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Verify, Publish & Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate JetBrains Marketplace token
+        env:
+          PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
+        run: |
+          if [ -z "${PUBLISH_TOKEN// }" ]; then
+            echo "::error::PUBLISH_TOKEN secret is not configured or empty."
+            exit 1
+          fi
+
+      - name: Extract and validate plugin version
+        id: meta
+        run: |
+          PLUGIN_VERSION=$(grep -E '^pluginVersion=' gradle.properties | cut -d'=' -f2 | tr -d '[:space:]')
+          if [ -z "$PLUGIN_VERSION" ]; then
+            echo "::error::Could not read pluginVersion from gradle.properties."
+            exit 1
+          fi
+          TAG_NAME="v${PLUGIN_VERSION}"
+          echo "version=${PLUGIN_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "${TAG_NAME}" ]; then
+            echo "::error::Git tag '${GITHUB_REF_NAME}' does not match gradle.properties pluginVersion ('${TAG_NAME}')."
+            exit 1
+          fi
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Build and verify plugin
+        run: ./gradlew buildPlugin verifyPluginStructure verifyPlugin --no-daemon
+
+      - name: Publish plugin to JetBrains Marketplace
+        run: ./gradlew publishPlugin --no-daemon
+        env:
+          PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
+          CERTIFICATE_CHAIN: ${{ secrets.CERTIFICATE_CHAIN }}
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          PRIVATE_KEY_PASSWORD: ${{ secrets.PRIVATE_KEY_PASSWORD }}
+
+      - name: Create GitHub Release
+        if: ${{ inputs.skip_github_release != true }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: FlowTags ${{ steps.meta.outputs.tag }}
+          files: build/distributions/*.zip
+          generate_release_notes: true

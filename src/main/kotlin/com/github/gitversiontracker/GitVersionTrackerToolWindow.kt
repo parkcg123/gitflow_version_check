@@ -20,6 +20,7 @@ import com.intellij.icons.AllIcons
 import com.intellij.ide.DataManager
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
+import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
@@ -1869,6 +1870,7 @@ class GitVersionStatusBarWidget(private val project: Project) : CustomStatusBarW
             override fun update(e: AnActionEvent) {
                 e.presentation.isEnabled = false
             }
+            override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
         }
     }
 

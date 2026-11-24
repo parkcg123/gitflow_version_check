@@ -6,3 +6,4 @@ out/
 *.iws
 *.ipr
 .DS_Store
+.intellijPlatform/
